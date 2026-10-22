@@ -1,0 +1,24 @@
+# 后端运行依赖（Python 3.10+，本项目在 3.12 上验证）
+#
+# 安装：python -m pip install -r backend/requirements.txt
+#
+# 说明：全部为纯 Python / 带预编译轮子的包，Windows 无需本地编译工具链。
+#       未配置任何外部 Key 时系统仍可完整启动运行（四组创新功能自动降级）。
+
+# ---- Web 框架与数据库 ----
+flask>=3.0
+pymysql>=1.1
+DBUtils>=3.2.0
+
+# ---- 取件二维码（纯 Python，无 Pillow 依赖）----
+segno>=1.6
+
+# ---- 创新点 4：支付宝 RSA2 签名 / 验签 ----
+# 只在 PAYMENT_PROVIDER=alipay 且凭据齐全时才真正使用；
+# 缺失时不报错，支付自动回落 mock 模拟支付（见 backend/integrations/alipay_client.py）。
+cryptography>=41.0
+
+# ---- 说明：以下标准库已足够，无需第三方包 ----
+#   · DeepSeek 调用   → urllib.request（不用 requests，减少依赖面）
+#   · 高德 Web 服务   → urllib.request
+#   · 定时/线程/签名  → threading / hmac / hashlib

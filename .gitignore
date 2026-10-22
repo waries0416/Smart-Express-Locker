@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 运行产物与日志
+logs/
+.workbuddy-ai/
+
+# 过程性临时脚本（下划线前缀，排查用，非交付物）
+_*.py
+**/_*.py
+quality/logs/
+
+# 用户资产与参考材料（不入库）
+plugins/
+智能纪要：门诊管理系统开发.docx
+智能快递柜系统答辩*.pptx
+
+# 覆盖率数据（coverage.py 的二进制 SQLite 数据文件，每跑一次覆盖率就重写；属运行产物，不是交付物）
+# 只忽略数据文件本身：quality/reports/coverage.xml 与 quality/reports/htmlcov/ 是交付证据，必须保留、
+# 不能被忽略；quality/.coveragerc（配置）也照常进版本库。
+# 说明：`.coverage` 无路径分隔符，按 gitignore 语义在任意层级生效，已覆盖 backend/.coverage；
+# 这里再显式写一行，是为了让"后端目录下那份"在审查时一眼可见。
+.coverage
+.coverage.*
+backend/.coverage
+
+# 数据库备份（mysqldump 产物，体积大且含演示数据，不入版本库）
+# 磁盘上保留备份文件本身，只是不提交；需要分发时用 tools/sync_init_dumps.py 生成快照。
+db/backup_before_fresh.sql
+db/*.backup.sql
+
+# 本地配置与密钥
+.env
+.env.*
+!.env.example
+*.local
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini

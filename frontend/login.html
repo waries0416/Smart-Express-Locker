@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>后台登录 · 智能快递柜管理系统</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    body { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #4f46e5 100%); min-height: 100vh; }
+    .login-wrap { min-height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center; padding: 30px 20px; }
+    .login-card {
+      width: 100%; max-width: 420px; background: #fff; border-radius: 18px;
+      box-shadow: 0 24px 60px rgba(15,23,42,.28); padding: 36px 34px 30px;
+    }
+    .login-head { text-align: center; margin-bottom: 26px; }
+    .login-head .licon { font-size: 46px; line-height: 1; }
+    .login-head h1 { font-size: 22px; margin: 12px 0 6px; color: var(--ink); }
+    .login-head p { margin: 0; color: var(--ink-2); font-size: 13.5px; }
+    .login-card label { display: block; font-size: 13px; color: var(--ink-2); margin: 0 0 6px; font-weight: 600; }
+    .login-card input {
+      width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px;
+      font-size: 15px; outline: none; transition: .15s; box-sizing: border-box; margin-bottom: 16px;
+    }
+    .login-card input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.14); }
+    .login-actions { margin-top: 4px; }
+    .login-actions .btn { width: 100%; justify-content: center; }
+    .login-back { text-align: center; margin-top: 18px; }
+    .login-back a { color: var(--ink-2); font-size: 13px; text-decoration: none; }
+    .login-back a:hover { color: var(--primary); }
+    .login-err {
+      display: none; margin-bottom: 14px; padding: 10px 12px; background: #fef2f2;
+      border: 1px solid #fecaca; border-radius: 8px; color: #b91c1c; font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">📦 智能快递柜管理系统 <small>后台管理登录</small></div>
+  </header>
+
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-head">
+        <div class="licon">🔐</div>
+        <h1>后台管理登录</h1>
+        <p>请使用管理员账号登录快递柜管理看板</p>
+      </div>
+
+      <div class="login-err" id="loginErr"></div>
+
+      <form id="loginForm" onsubmit="doLogin(event)">
+        <label for="username">账号</label>
+        <input id="username" name="username" autocomplete="username" placeholder="请输入账号" value="admin" />
+
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" value="admin123" />
+
+        <div class="login-actions">
+          <button type="submit" class="btn" id="loginBtn">登 录</button>
+        </div>
+      </form>
+
+      <div class="login-back">
+        <a href="/">← 返回快递柜</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    // 管理端路由：由当前地址反推前缀，后端 ADMIN_PATH 改名时前端无需同步修改
+    const ADMIN_BASE = location.pathname.replace(/\/$/, "").replace(/\/(login|dashboard)$/, "");
+    const ADMIN_HOME = ADMIN_BASE + "/dashboard";
+
+    // 已有有效会话（服务端 HttpOnly Cookie）则直接进入看板，避免重复登录
+    (function () {
+      fetch("/api/auth/verify", { credentials: "same-origin" })
+        .then((r) => { if (r.ok) location.replace(ADMIN_HOME); })
+        .catch(() => { /* 未登录属正常情况，留在登录页 */ });
+    })();
+
+    function showErr(msg) {
+      const el = document.getElementById("loginErr");
+      el.textContent = msg;
+      el.style.display = msg ? "block" : "none";
+    }
+
+    async function doLogin(ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      showErr("");
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      if (!username || !password) { showErr("请输入账号和密码"); return; }
+
+      const btn = document.getElementById("loginBtn");
+      btn.disabled = true; btn.textContent = "登录中…";
+      try {
+        // 登录成功后服务端下发 HttpOnly Cookie，前端不再持有 token
+        const r = await API.login({ username, password });
+        toast(r.message || "登录成功", "success");
+        setTimeout(() => location.replace(ADMIN_HOME), 500);
+      } catch (e) {
+        showErr(e.message || "登录失败");
+        btn.disabled = false; btn.textContent = "登 录";
+      }
+    }
+  </script>
+</body>
+</html>
