@@ -1,0 +1,418 @@
+/* 快递柜触屏端专用样式 —— 大字号、触摸友好、深色科技感 */
+/* hidden 属性统一强制生效：本文件里 .login-bar 等用了 display:flex，
+   会盖掉浏览器默认的 [hidden]{display:none}，导致 JS 设 hidden 无效。 */
+[hidden] { display: none !important; }
+.kiosk-body {
+  background: radial-gradient(circle at 50% -10%, #1e3a8a 0%, #0f172a 55%);
+  color: #e2e8f0; min-height: 100vh;
+}
+.kiosk-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 26px; background: rgba(15,23,42,.6); border-bottom: 1px solid rgba(255,255,255,.08);
+  backdrop-filter: blur(6px);
+}
+.kh-left { display: flex; align-items: center; gap: 14px; }
+.kh-logo { font-size: 34px; }
+.kh-title { font-size: 22px; font-weight: 800; color: #fff; white-space: nowrap; }
+.kh-sub { font-size: 13px; color: #94a3b8; }
+/* 左上角柜体切换：触屏端常驻，切换后存件/取件/揽收/寄件均以所选柜体为准 */
+.cabinet-switch {
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.18); color: #fff;
+  border-radius: 10px; padding: 8px 12px; font-size: 14px; font-weight: 700; cursor: pointer;
+  max-width: 240px; transition: .15s;
+}
+.cabinet-switch:hover { border-color: #3b82f6; background: rgba(37,99,235,.25); }
+.cabinet-switch option { background: #fff; color: #0f172a; }
+.kh-right { display: flex; align-items: center; gap: 18px; }
+.kh-clock { font-size: 20px; font-variant-numeric: tabular-nums; color: #cbd5e1; }
+.kh-status { color: #4ade80; font-weight: 700; font-size: 14px; }
+/* 返回系统首页：触屏端常驻入口，任何子页面都能一键回到站点首页 */
+.kh-home {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: #cbd5e1; text-decoration: none; font-size: 14px; font-weight: 700;
+  padding: 9px 16px; border: 1px solid rgba(203,213,225,.32); border-radius: 10px;
+  background: rgba(255,255,255,.05); transition: .16s; white-space: nowrap;
+}
+.kh-home:hover {
+  color: #fff; background: rgba(37,99,235,.35);
+  border-color: #3b82f6; transform: translateY(-1px);
+}
+.kh-home:active { transform: translateY(0); }
+
+.kiosk-screen { display: none; padding: 34px 26px; max-width: 980px; margin: 0 auto; }
+.kiosk-screen.active { display: block; animation: fade .25s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.kiosk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; margin-top: 20px; }
+@media (max-width: 640px) { .kiosk-grid { grid-template-columns: 1fr; } }
+.kiosk-btn {
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 20px; padding: 34px 24px; cursor: pointer; color: #e2e8f0;
+  text-align: left; transition: .18s; backdrop-filter: blur(4px);
+}
+.kiosk-btn:hover { background: rgba(37,99,235,.25); border-color: #3b82f6; transform: translateY(-3px); }
+.kb-emoji { font-size: 52px; }
+.kb-title { font-size: 24px; font-weight: 800; margin: 12px 0 6px; color: #fff; }
+.kb-desc { font-size: 14px; color: #94a3b8; }
+
+.kiosk-panel {
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 20px; padding: 30px; margin-top: 10px;
+}
+.kiosk-panel h2 { color: #fff; margin: 0 0 16px; font-size: 24px; }
+.kiosk-panel label { color: #cbd5e1; }
+.kiosk-panel input, .kiosk-panel select {
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.16); color: #fff;
+}
+/* 原生下拉展开列表：option 默认继承白字、白底白字只能看到高亮行，这里强制白底深字 */
+.kiosk-panel select option {
+  background: #fff; color: #0f172a;
+}
+.kiosk-panel select option:checked {
+  background: #2563eb; color: #fff;
+}
+.kiosk-panel select option:disabled {
+  color: #94a3b8;
+}
+/* 寄件单关联提示行 */
+.assoc-hint {
+  margin-top: 8px; font-size: 13px; line-height: 1.6; color: #86efac; min-height: 18px;
+}
+/* 寄件单快速匹配结果列表 */
+.lookup-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14);
+  border-radius: 10px; padding: 10px 12px; margin-top: 8px;
+  font-size: 13px; color: #e2e8f0; line-height: 1.5;
+}
+.lookup-item .btn.sm { padding: 6px 14px; flex: 0 0 auto; }
+.kiosk-panel input::placeholder { color: #64748b; }
+.kiosk-panel input:disabled { opacity: .8; color: #94a3b8; }
+
+.size-select { display: flex; gap: 10px; }
+.size-select button {
+  flex: 1; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.05); color: #e2e8f0; font-size: 16px; font-weight: 700; cursor: pointer;
+  transition: .15s;
+}
+.size-select button.active { background: #2563eb; border-color: #3b82f6; color: #fff; }
+.size-select button .cap-num {
+  display: block; font-size: 12px; font-weight: 500; opacity: .75; margin-top: 5px;
+}
+.size-select button:disabled { opacity: .4; cursor: not-allowed; }
+.size-select button:disabled .cap-num { opacity: .7; }
+.cap-stats { font-weight: 500; color: #94a3b8; font-size: 12px; margin-left: 8px; }
+/* 多条件检索（投递记录）：横向一组筛选项 */
+.filter-row { display: flex; gap: 8px; margin-top: 8px; }
+.filter-row > * { flex: 1; min-width: 0; }
+
+.code-display {
+  font-size: 46px; font-weight: 800; letter-spacing: 14px; text-align: center;
+  color: #fff; background: rgba(0,0,0,.25); border-radius: 14px; padding: 20px; margin: 18px 0;
+  font-variant-numeric: tabular-nums;
+}
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 360px; margin: 0 auto; }
+.keypad button {
+  padding: 22px 0; font-size: 26px; font-weight: 700; border-radius: 14px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.08); color: #fff; transition: .12s;
+}
+.keypad button:hover { background: rgba(37,99,235,.35); }
+.keypad button:active { transform: scale(.96); }
+.keypad .key-del { color: #fca5a5; }
+
+/* 弹层 */
+.kiosk-modal {
+  position: fixed; inset: 0; background: rgba(2,6,23,.7); display: none;
+  align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px);
+}
+.kiosk-modal.show { display: flex; animation: fade .2s; }
+.km-card {
+  background: #fff; color: #0f172a; border-radius: 22px; padding: 36px 40px;
+  width: min(420px, 90vw); text-align: center; box-shadow: 0 30px 80px rgba(0,0,0,.5);
+}
+.km-icon { font-size: 64px; }
+.km-card h3 { margin: 8px 0 14px; font-size: 22px; }
+#kmBody { font-size: 15px; color: #475569; margin-bottom: 20px; line-height: 1.8; }
+#kmBody .big-code {
+  font-size: 34px; font-weight: 800; color: #2563eb; letter-spacing: 6px;
+  background: #eff6ff; padding: 10px; border-radius: 12px; margin: 10px 0; font-variant-numeric: tabular-nums;
+}
+/* ---------------- 首页：扫码取件 + 取件码取件 ---------------- */
+.home-grid {
+  display: grid; grid-template-columns: 1.05fr .95fr; gap: 26px;
+  max-width: 1040px; margin: 26px auto 0; align-items: stretch;
+}
+@media (max-width: 820px) { .home-grid { grid-template-columns: 1fr; } }
+.home-card {
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 24px; padding: 26px 26px 22px; backdrop-filter: blur(6px);
+  box-shadow: 0 18px 44px rgba(2,6,23,.35);
+}
+.hc-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.hc-ico { font-size: 34px; flex: 0 0 auto; }
+.hc-title { font-size: 21px; font-weight: 800; color: #fff; }
+.hc-sub { font-size: 13px; color: #94a3b8; margin-top: 3px; line-height: 1.5; }
+
+/* 二维码框：白底圆角 + 过期遮罩 */
+.qr-frame {
+  position: relative; width: 100%; max-width: 250px; margin: 0 auto;
+  aspect-ratio: 1 / 1; background: #fff; border-radius: 18px; padding: 10px;
+  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 4px rgba(59,130,246,.25), 0 14px 34px rgba(2,6,23,.45);
+}
+.qr-frame img { width: 100%; height: 100%; display: block; border-radius: 8px; }
+.qr-mask {
+  position: absolute; inset: 0; border-radius: 18px; background: rgba(15,23,42,.82);
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  color: #e2e8f0; font-size: 14px; font-weight: 700; padding: 12px; line-height: 1.6;
+}
+.qr-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 14px 2px 10px;
+}
+.qr-state { font-size: 13.5px; font-weight: 700; color: #93c5fd; }
+.qr-state.wait { color: #93c5fd; }
+.qr-state.confirm { color: #fde047; }
+.qr-state.expired, .qr-state.error { color: #fca5a5; }
+.qr-state.loading { color: #94a3b8; }
+.qr-count {
+  font-size: 13px; font-weight: 700; color: #cbd5e1; font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,.08); border-radius: 999px; padding: 3px 12px; white-space: nowrap;
+}
+.qr-refresh { display: block; margin: 0 auto; }
+.qr-tip { font-size: 12.5px; color: #94a3b8; margin: 10px 0 0; line-height: 1.7; text-align: center; }
+
+/* 已扫码登录后的会话卡 */
+.auth-box { text-align: center; padding: 8px 4px 4px; }
+.ab-avatar {
+  width: 84px; height: 84px; margin: 4px auto 14px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 42px;
+  background: rgba(37,99,235,.22); border: 2px solid rgba(147,197,253,.5);
+}
+.ab-name { font-size: 22px; font-weight: 800; color: #fff; }
+.ab-role { font-size: 13.5px; color: #94a3b8; margin-top: 6px; line-height: 1.6; }
+.ab-btns { display: flex; gap: 12px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+
+/* 取件码输入 */
+.code-entry { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.code-input {
+  width: 100%; box-sizing: border-box; text-align: center;
+  font-size: 40px; font-weight: 900; letter-spacing: 12px; font-variant-numeric: tabular-nums;
+  padding: 18px 12px 18px 24px; border-radius: 16px;
+  background: rgba(0,0,0,.28); border: 2px solid rgba(255,255,255,.18); color: #fff;
+  outline: none; transition: .15s;
+}
+.code-input::placeholder { font-size: 18px; letter-spacing: 2px; font-weight: 600; color: #64748b; }
+.code-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(37,99,235,.22); }
+.code-btn { width: 100%; padding: 18px; font-size: 20px; font-weight: 800; }
+.hc-note {
+  margin-top: 16px; font-size: 12.5px; line-height: 1.8; color: #94a3b8;
+  background: rgba(255,255,255,.04); border: 1px dashed rgba(255,255,255,.16);
+  border-radius: 12px; padding: 12px 14px;
+}
+.hc-note b { color: #cbd5e1; }
+.hc-note code {
+  background: rgba(37,99,235,.25); color: #bfdbfe; padding: 1px 6px; border-radius: 5px;
+  font-size: 12px;
+}
+.home-foot {
+  display: flex; gap: 14px; justify-content: center; margin: 26px auto 0; flex-wrap: wrap;
+}
+
+/* 角色子首页：三个中等功能按钮 */
+.role-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 6px;
+}
+@media (max-width: 640px) { .role-grid { grid-template-columns: 1fr; } }
+.role-btn {
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14);
+  border-radius: 20px; padding: 30px 16px; cursor: pointer; color: #e2e8f0;
+  text-align: center; transition: .18s;
+}
+.role-btn:hover { background: rgba(37,99,235,.3); border-color: #3b82f6; transform: translateY(-3px); }
+.role-btn:active { transform: scale(.98); }
+.rb-emoji { font-size: 42px; }
+.rb-title { font-size: 19px; font-weight: 800; color: #fff; margin: 10px 0 4px; }
+.rb-desc { font-size: 13px; color: #94a3b8; }
+
+/* 帮助页双栏 */
+.help-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-bottom: 12px; }
+@media (max-width: 640px) { .help-cols { grid-template-columns: 1fr; } }
+.help-cols h3 { color: #fff; margin: 0 0 8px; font-size: 17px; }
+.help-cols ul { margin: 0; padding-left: 18px; line-height: 1.9; color: #cbd5e1; font-size: 13.5px; }
+
+/* ===========================================================================
+   帮助屏 · AI 问答入口条
+   =========================================================================== */
+.help-ai-entry {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: linear-gradient(135deg, rgba(99,102,241,.28), rgba(139,92,246,.22));
+  border: 1px solid rgba(139,92,246,.45);
+  border-radius: 16px; padding: 16px 20px; margin-top: 16px;
+}
+.hae-title { color: #fff; font-size: 16.5px; font-weight: 800; }
+.hae-sub { color: #cbd5e1; font-size: 13px; margin-top: 3px; }
+.hae-btn { flex: none; min-height: 48px; padding: 12px 26px; font-size: 16px; }
+
+/* ===========================================================================
+   AI 问答屏（触屏端）
+   ---------------------------------------------------------------------------
+   触屏端是站立操作、远距离阅读，所以：
+   · 按钮/输入框高度均 ≥ 48px（普通移动端要求 44px，触屏更保守）
+   · 消息字号 16px 起，行高放宽
+   · 问答区固定高度并内部滚动，避免整屏跳动
+   =========================================================================== */
+.kai-log {
+  max-height: 420px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px; margin-bottom: 16px;
+  background: rgba(0, 0, 0, .22);
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 16px;
+}
+.kai-msg { display: flex; align-items: flex-end; gap: 8px; }
+.kai-msg.user { flex-direction: row-reverse; }
+.kai-bubble {
+  max-width: 76%; padding: 13px 17px; border-radius: 16px;
+  font-size: 16px; line-height: 1.7;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.kai-msg.bot .kai-bubble {
+  background: rgba(255, 255, 255, .1); color: #e2e8f0;
+  border-bottom-left-radius: 5px;
+}
+.kai-msg.user .kai-bubble {
+  background: #2563eb; color: #fff;
+  border-bottom-right-radius: 5px;
+}
+.kai-src {
+  flex: none; font-size: 12px; font-weight: 700;
+  padding: 2px 9px; border-radius: 8px; white-space: nowrap;
+}
+.kai-src.src-ai { background: rgba(139, 92, 246, .28); color: #ddd6fe; }
+.kai-src.src-rule { background: rgba(14, 165, 233, .26); color: #bae6fd; }
+.kai-src.src-unknown { background: rgba(148, 163, 184, .22); color: #cbd5e1; }
+
+/* 输入行：输入框 + 发送按钮，按钮不换行、高度足够 */
+.kai-input-row { display: flex; gap: 12px; align-items: stretch; }
+.kai-input {
+  flex: 1; min-width: 0; min-height: 52px;
+  padding: 14px 16px; font-size: 16px;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 14px; color: #fff;
+}
+.kai-input::placeholder { color: #94a3b8; }
+.kai-input:focus {
+  outline: none; border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .2);
+}
+.kai-send {
+  flex: none; min-height: 52px; padding: 14px 30px;
+  font-size: 16.5px; font-weight: 800; border-radius: 14px;
+}
+.kai-hint { font-size: 12.5px; color: #94a3b8; margin: 8px 0 0; min-height: 17px; }
+.kai-quick { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.kai-quick .btn {
+  min-height: 46px; padding: 11px 18px; font-size: 14.5px;
+  background: rgba(255, 255, 255, .06); color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, .16);
+}
+.kai-quick .btn:hover { background: rgba(37, 99, 235, .3); border-color: #3b82f6; color: #fff; }
+
+/* 支付提供方标识（弹层内） */
+.pay-provider-line {
+  display: flex; align-items: center; justify-content: center;
+  gap: 9px; flex-wrap: wrap; margin: 4px 0 2px;
+}
+.pay-provider-tag {
+  font-size: 13px; font-weight: 800;
+  padding: 3px 11px; border-radius: 999px;
+}
+.pay-provider-tag.mock { background: #fef3c7; color: #92400e; border: 1px dashed #fbbf24; }
+.pay-provider-tag.real { background: #dcfce7; color: #15803d; }
+.pay-provider-note { font-size: 12.5px; color: #64748b; }
+
+/* 窄屏（<900px，如 1280×900 以下的小屏一体机）下的兜底 */
+@media (max-width: 900px) {
+  .kai-bubble { max-width: 88%; }
+  .help-ai-entry { flex-direction: column; align-items: stretch; text-align: center; }
+  .hae-btn { width: 100%; }
+}
+
+/* 批量取件列表 */
+.list-card { width: min(460px, 92vw); text-align: left; }
+.list-card h3 { text-align: center; }
+.pkg-list { max-height: 46vh; overflow-y: auto; margin: 8px 0; display: flex; flex-direction: column; gap: 10px; }
+.pkg-item {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 16px;
+}
+.pkg-item.need-pay { background: #fef2f2; border-color: #fecaca; }
+.pi-cell { font-size: 17px; font-weight: 800; color: #0f172a; }
+.pi-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+.pi-badge { font-size: 13px; font-weight: 700; color: #16a34a; background: #dcfce7; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.pi-badge.ok { color: #16a34a; background: #dcfce7; }
+/* 包裹状态 → 颜色（投递记录/合并列表徽章按状态区分，浅底深字便于触屏辨认） */
+.pi-badge.STORED           { color: #1d4ed8; background: #dbeafe; }   /* 待取件：蓝 */
+.pi-badge.PICKED           { color: #15803d; background: #dcfce7; }   /* 已取件：绿 */
+.pi-badge.EXPIRED          { color: #b91c1c; background: #fee2e2; }   /* 已超时：红 */
+.pi-badge.EXCEPTION        { color: #6d28d9; background: #ede9fe; }   /* 异常：紫 */
+.pi-badge.RETURNED         { color: #475569; background: #e2e8f0; }   /* 已退回：深灰 */
+.pi-badge.SEND_WAIT_PICKUP { color: #0e7490; background: #cffafe; }   /* 待揽收：青 */
+.pi-badge.SEND_COLLECTED   { color: #c2410c; background: #ffedd5; }   /* 已揽收·未送达：橙 */
+.pi-badge.SEND_CANCELLED   { color: #64748b; background: #f1f5f9; }   /* 已撤回：浅灰 */
+.pkg-item.need-pay .pi-badge { color: #dc2626; background: #fee2e2; }
+
+/* 超时扫码支付 */
+.pay-card .pay-qr {
+  font-size: 70px; width: 120px; height: 120px; margin: 0 auto 8px; border-radius: 18px;
+  display: flex; align-items: center; justify-content: center; background: #0f172a; color: #fff;
+}
+/* 有二维码时：由 JS 给外层加 .has-qr，取消固定 120x120，避免压住下方标题 */
+.pay-card .pay-qr.has-qr {
+  width: auto; height: auto; background: transparent; border-radius: 0;
+  font-size: 0; display: block;
+}
+/* 真实二维码：白底 + 固定尺寸，保证扫码识别率 */
+.pay-qr-canvas {
+  display: block; margin: 0 auto; padding: 8px; background: #fff;
+  border-radius: 14px; box-shadow: 0 4px 18px rgba(15, 23, 42, .12);
+  image-rendering: pixelated;
+}
+/* 扫码不便时的跳转收银台按钮 */
+.pay-jump {
+  display: block; margin: 4px auto 10px; padding: 10px 18px; font-size: 14px;
+  text-decoration: none; text-align: center; border-radius: 12px; max-width: 320px;
+}
+.pay-amount { font-size: 44px; font-weight: 900; color: #dc2626; margin: 6px 0; }
+.pay-progress { font-size: 14px; color: #64748b; margin: 6px 0 14px; }
+.pay-progress.ok { color: #16a34a; font-weight: 700; }
+.pay-progress.err { color: #dc2626; font-weight: 700; }
+
+/* 开柜引导 */
+.door-card { background: #052e16; color: #fff; border: 2px solid #22c55e; }
+.door-card h3 { color: #fff; }
+.door-icon { font-size: 60px; }
+.cell-highlight {
+  font-size: 56px; font-weight: 900; letter-spacing: 4px; color: #0f172a;
+  background: #4ade80; border-radius: 16px; padding: 14px; margin: 14px 0; animation: pulse 1.1s infinite;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(74,222,128,.7); } 50% { box-shadow: 0 0 0 16px rgba(74,222,128,0); } }
+.door-info { font-size: 14px; color: #bbf7d0; margin-bottom: 14px; line-height: 1.7; }
+.countdown {
+  font-size: 40px; font-weight: 900; color: #fde047; font-variant-numeric: tabular-nums;
+}
+.countdown-label { font-size: 12px; color: #86efac; margin-bottom: 16px; }
+.door-card .btn { background: #22c55e; color: #052e16; border: none; font-weight: 800; width: 100%; margin-top: 8px; }
+.door-card .btn.ghost { background: rgba(255,255,255,.12); color: #fff; }
+
+/* 登录身份栏（取件屏 / 快递员首页） */
+.login-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(37,99,235,.14); border: 1px solid rgba(37,99,235,.32);
+  border-radius: 12px; padding: 8px 14px; margin-bottom: 14px;
+}
+.login-bar span { font-size: 15px; font-weight: 700; color: #bfdbfe; }
+.login-bar .btn { flex: 0 0 auto; }
