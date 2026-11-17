@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2563eb" />
+  <title>快递柜 · 手机取件</title>
+  <link rel="stylesheet" href="/m/css/mobile.css" />
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <div class="brand">📦 快递柜</div>
+    <div class="hdr-right">
+      <span class="hdr-sub" id="hdrSub">手机取件</span>
+    </div>
+  </header>
+
+  <main class="main" id="main">
+
+    <!-- ================= 登录 ================= -->
+    <section class="screen active" id="screen-login">
+      <div class="login-hero">
+        <div class="login-emoji">📦</div>
+        <h1>手机取件</h1>
+        <p>不用排队，到柜前远程开柜</p>
+      </div>
+
+      <!-- 身份切换：用户（验证码）/ 快递员（工号+手机号） -->
+      <div class="role-switch" id="roleSwitch">
+        <button class="rs-btn active" data-role="USER" type="button">👤 我是用户</button>
+        <button class="rs-btn" data-role="COURIER" type="button">🚚 我是快递员</button>
+      </div>
+
+      <!-- 用户：手机号 + 短信验证码 -->
+      <div class="card" id="userLoginPane">
+        <label class="field">
+          <span>手机号</span>
+          <input id="loginPhone" type="tel" inputmode="numeric" maxlength="11"
+                 placeholder="请输入 11 位手机号" autocomplete="tel" />
+        </label>
+        <label class="field">
+          <span>验证码</span>
+          <div class="code-row">
+            <input id="loginCode" type="tel" inputmode="numeric" maxlength="6"
+                   placeholder="6 位验证码" autocomplete="one-time-code" />
+            <button class="btn ghost sm" id="btnSendCode" type="button">获取验证码</button>
+          </div>
+        </label>
+        <p class="hint" id="loginHint">演示环境验证码会直接显示在这里</p>
+        <p class="err" id="loginErr"></p>
+        <button class="btn primary block" id="btnLogin" type="button">登录 / 注册</button>
+      </div>
+
+      <!-- 快递员：工号 + 手机号（与触屏端同一套双因子校验） -->
+      <div class="card" id="courierLoginPane" hidden>
+        <label class="field">
+          <span>工号</span>
+          <input id="courierNo" maxlength="20" placeholder="如 E00001" style="text-transform:uppercase;" />
+        </label>
+        <label class="field">
+          <span>手机号</span>
+          <input id="courierPhone" type="tel" inputmode="numeric" maxlength="11" placeholder="11 位手机号" />
+        </label>
+        <p class="err" id="courierErr"></p>
+        <button class="btn primary block" id="btnCourierLogin" type="button">快递员登录</button>
+        <p class="hint">快递员登录后，扫柜机二维码即可让柜机直接进入存件界面</p>
+      </div>
+
+      <p class="foot-note" id="loginFoot">未注册的手机号将自动创建账号</p>
+    </section>
+
+    <!-- ================= 取件 ================= -->
+    <section class="screen" id="screen-pickup">
+      <div class="greet" id="greet">你好</div>
+
+      <div class="card">
+        <div class="code-row">
+          <input id="manualCode" type="tel" inputmode="numeric" maxlength="6"
+                 placeholder="输入 6 位取件码" />
+          <button class="btn ghost sm" id="btnQueryCode" type="button">查询</button>
+        </div>
+      </div>
+      <p class="hint center">在柜机前可用手机相机扫屏幕二维码，柜机会自动登录并列出待取包裹</p>
+
+      <div class="section-title">
+        待取包裹 <span class="pill" id="pendingCount">0</span>
+      </div>
+      <div class="list" id="pendingList"></div>
+      <div class="empty" id="pendingEmpty" hidden>
+        <div class="empty-emoji">🎉</div>
+        <p>暂无待取包裹</p>
+      </div>
+    </section>
+
+    <!-- ================= 取件详情 ================= -->
+    <section class="screen" id="screen-detail">
+      <button class="link-back" id="btnBackDetail" type="button">← 返回</button>
+      <div class="card detail-card">
+        <div class="detail-head">
+          <div>
+            <div class="detail-cabinet" id="dCabinet">--</div>
+            <div class="detail-loc" id="dLocation">--</div>
+          </div>
+          <span class="badge" id="dStatus">待取</span>
+        </div>
+        <div class="kv"><span>运单号</span><b id="dTracking">--</b></div>
+        <div class="kv"><span>规格</span><b id="dSize">--</b></div>
+        <div class="kv"><span>存入时间</span><b id="dStoreTime">--</b></div>
+        <div class="kv"><span>免费保管至</span><b id="dExpire">--</b></div>
+        <div class="kv" id="dFeeRow" hidden><span>超时保管费</span><b class="fee" id="dFee">¥0.00</b></div>
+        <div class="kv"><span>格口</span><b class="muted" id="dCell">开柜后显示</b></div>
+      </div>
+      <p class="hint center" id="dTip">确认后柜门将自动弹开，请在 30 秒内取走包裹</p>
+      <button class="btn primary block" id="btnOpen" type="button">确认开柜</button>
+    </section>
+
+    <!-- ================= 开柜结果 ================= -->
+    <section class="screen" id="screen-result">
+      <div class="result-wrap">
+        <div class="result-emoji">🔓</div>
+        <div class="result-title">柜门已弹开</div>
+        <div class="result-cell" id="rCell">--</div>
+        <div class="result-cabinet" id="rCabinet">--</div>
+        <div class="countdown">
+          <div class="countdown-bar"><i id="rBar"></i></div>
+          <span id="rCountdown">30s</span>
+        </div>
+        <p class="hint center" id="rTip">请取走包裹并关好柜门</p>
+        <button class="btn primary block" id="btnDone" type="button">我已取走</button>
+        <button class="btn ghost block" id="btnReopen" type="button">重新开门</button>
+      </div>
+    </section>
+
+    <!-- ================= 寄件 ================= -->
+    <section class="screen" id="screen-send">
+      <div class="section-title">寄件下单</div>
+      <div class="card">
+        <label class="field"><span>收件人</span>
+          <input id="sendRecipientName" placeholder="收件人姓名" maxlength="30" /></label>
+        <label class="field"><span>收件人手机号</span>
+          <input id="sendRecipientPhone" type="tel" inputmode="numeric" maxlength="11" placeholder="11 位手机号" /></label>
+        <div class="grid2">
+          <label class="field"><span>规格</span>
+            <select id="sendSize">
+              <option value="SMALL">小件 ≤5kg</option>
+              <option value="MEDIUM" selected>中件 ≤10kg</option>
+              <option value="LARGE">大件 ≤20kg</option>
+            </select></label>
+          <label class="field"><span>重量(kg)</span>
+            <input id="sendWeight" type="number" min="0" step="0.1" value="1" /></label>
+        </div>
+        <label class="field"><span>快递公司</span>
+          <select id="sendCompany"></select></label>
+        <label class="field"><span>投递柜机</span>
+          <select id="sendCabinet"></select></label>
+        <label class="field"><span>备注</span>
+          <input id="sendNote" placeholder="选填" maxlength="200" /></label>
+        <p class="err" id="sendErr"></p>
+        <button class="btn primary block" id="btnSend" type="button">下单并开柜</button>
+      </div>
+      <div class="card result-card" id="sendResult" hidden>
+        <div class="section-title">下单成功</div>
+        <div class="kv"><span>揽收码</span><b class="big" id="srCode">--</b></div>
+        <div class="kv"><span>柜机 / 格口</span><b id="srCell">--</b></div>
+        <div class="kv"><span>运单号</span><b id="srTracking">--</b></div>
+        <p class="hint">请把物品放入格口并关好柜门，快递员将在 48 小时内揽收</p>
+      </div>
+    </section>
+
+    <!-- ================= 扫码确认登录柜机 ================= -->
+    <section class="screen" id="screen-ticket">
+      <div id="tkConfirmPane">
+        <div class="ticket-hero">
+          <div class="login-emoji">🖥️</div>
+          <h1>确认登录柜机</h1>
+          <p>柜机将使用您的身份，可直接开柜</p>
+        </div>
+        <div class="card">
+          <div class="kv"><span>柜机</span><b id="tkCabinet">--</b></div>
+          <div class="kv"><span>位置</span><b id="tkLocation">--</b></div>
+          <div class="kv"><span>登录身份</span><b id="tkIdentity">--</b></div>
+          <div class="kv"><span>有效期</span><b id="tkExpire">--</b></div>
+        </div>
+        <p class="hint center">确认后请按柜机屏幕提示操作；离开时柜机会自动退出登录</p>
+        <button class="btn primary block" id="btnTicketConfirm" type="button">确认登录</button>
+        <button class="btn ghost block" id="btnTicketCancel" type="button">不是我，取消</button>
+      </div>
+
+      <div id="tkDonePane" hidden>
+        <div class="result-wrap">
+          <div class="result-emoji">✅</div>
+          <div class="result-title">已确认</div>
+          <div class="result-cabinet" id="tkDoneMsg">柜机正在登录…</div>
+          <p class="hint center">请回到柜机屏幕继续操作</p>
+          <button class="btn primary block" id="btnTicketDone" type="button">完成</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 快递员工作台 ================= -->
+    <section class="screen" id="screen-courier">
+      <div class="greet" id="cGreet">你好</div>
+      <div class="card me-card">
+        <div class="avatar" id="cAvatar">🚚</div>
+        <div>
+          <div class="me-name" id="cName">--</div>
+          <div class="me-phone" id="cMeta">--</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title" style="margin:0 0 8px;">扫码登录柜机</div>
+        <p class="hint" style="margin:0;">在柜机前用手机相机（或微信扫一扫）扫屏幕上的二维码，确认后柜机会以您的身份登录，直接进入存件界面，免输工号。</p>
+      </div>
+
+      <p class="hint center">登录柜机后即可在触屏端存件、揽收、查询投递记录</p>
+      <button class="btn ghost block" id="btnCourierLogout" type="button">退出登录</button>
+    </section>
+
+    <!-- ================= 我的 ================= -->
+    <section class="screen" id="screen-me">
+      <div class="card me-card">
+        <div class="avatar" id="meAvatar">👤</div>
+        <div>
+          <div class="me-name" id="meName">未登录</div>
+          <div class="me-phone" id="mePhone">--</div>
+        </div>
+      </div>
+
+      <div class="section-title">历史包裹</div>
+      <div class="list" id="historyList"></div>
+      <div class="empty" id="historyEmpty" hidden><p>还没有历史记录</p></div>
+
+      <div class="section-title">消息通知</div>
+      <div class="list" id="msgList"></div>
+      <div class="empty" id="msgEmpty" hidden><p>暂无消息</p></div>
+
+      <button class="btn ghost block" id="btnLogout" type="button">退出登录</button>
+    </section>
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tab active" data-tab="pickup" type="button"><span class="t-emoji">📦</span>取件</button>
+    <button class="tab" data-tab="send" type="button"><span class="t-emoji">📤</span>寄件</button>
+    <button class="tab" data-tab="me" type="button"><span class="t-emoji">👤</span>我的</button>
+  </nav>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/m/js/app.js"></script>
+</body>
+</html>

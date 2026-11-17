@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>快递柜触屏端 · 智能快递柜管理系统</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/kiosk.css" />
+</head>
+<body class="kiosk-body">
+  <header class="kiosk-header">
+    <div class="kh-left">
+      <span class="kh-logo">📦</span>
+      <div>
+        <div class="kh-title">快递柜</div>
+      </div>
+      <select id="cabinetSwitch" class="cabinet-switch" title="切换柜体" onchange="switchCabinet(this.value)"></select>
+    </div>
+    <div class="kh-right">
+      <span id="clock" class="kh-clock">--:--:--</span>
+      <span class="kh-status" id="cabinetStatus">● 正常</span>
+      <span class="kh-home" title="设备故障或取件遇到问题，请联系现场工作人员">📞 客服 400-000-0000</span>
+    </div>
+  </header>
+
+  <!-- ================= 首页：扫码取件 + 取件码取件（柜机仅保留这两件事） ================= -->
+  <section class="kiosk-screen active" id="screen-home">
+    <div class="home-grid">
+      <!-- 左：扫码登录取件 -->
+      <div class="home-card">
+        <div class="hc-head">
+          <span class="hc-ico">📱</span>
+          <div>
+            <div class="hc-title">扫码取件</div>
+            <div class="hc-sub">手机相机扫一扫，确认后柜门自动弹开</div>
+          </div>
+        </div>
+
+        <div id="homeQrBox">
+          <div class="qr-frame">
+            <img id="homeQrImg" alt="扫码取件二维码" />
+            <div class="qr-mask" id="homeQrMask"><span id="homeQrMaskText">正在生成二维码…</span></div>
+          </div>
+          <div class="qr-meta">
+            <span class="qr-state" id="scanLoginState">正在生成二维码…</span>
+            <span class="qr-count" id="homeQrCountdown">--</span>
+          </div>
+          <button class="btn sm ghost qr-refresh" id="homeQrRefresh" onclick="refreshQrTicket()">🔄 刷新二维码</button>
+        </div>
+
+        <!-- 已扫码登录后：显示身份与继续/退出（真实柜机的"会话"体验） -->
+        <div class="auth-box" id="homeAuthBox" hidden>
+          <div class="ab-avatar" id="homeUserAvatar">👤</div>
+          <div class="ab-name" id="homeUserState">已登录</div>
+          <div class="ab-role" id="homeUserRole"></div>
+          <div class="ab-btns">
+            <button class="btn green" id="homeContinueBtn" onclick="continueAfterLogin()">继续</button>
+            <button class="btn ghost" onclick="logoutKiosk()">退出登录</button>
+          </div>
+          <p class="qr-tip">为保护隐私，长时间无操作会自动退出</p>
+        </div>
+      </div>
+
+      <!-- 右：取件码取件（没带手机 / 不愿扫码时使用） -->
+      <div class="home-card">
+        <div class="hc-head">
+          <span class="hc-ico">🔢</span>
+          <div>
+            <div class="hc-title">输入取件码</div>
+            <div class="hc-sub">取件码见短信或手机端「我的包裹」</div>
+          </div>
+        </div>
+        <div class="code-entry">
+          <input id="homeCodeInput" class="code-input" inputmode="numeric" maxlength="6"
+                 placeholder="6 位取件码" autocomplete="off" />
+          <button class="btn green code-btn" id="homeCodeBtn" onclick="submitHomeCode()">立即取件</button>
+        </div>
+        <p class="qr-tip" style="text-align:left;">超时包裹会先提示支付保管费，付完自动开柜</p>
+        <div class="hc-note">
+          <b>取不到？</b>包裹若为他人代收，请让收件人用手机端「我的包裹」远程开柜；
+          寄件、我的包裹、消息通知已迁至手机端 <code>/m</code>。
+        </div>
+      </div>
+    </div>
+
+    <div class="home-foot">
+      <button class="btn ghost" id="homeCourierBtn" onclick="go('courier-home')">🚚 快递员存件</button>
+      <button class="btn ghost" id="homeHelpBtn" onclick="go('about')">📖 使用帮助</button>
+    </div>
+  </section>
+
+  <!-- ================= 取件（扫码登录后 / 输码取件共用） ================= -->
+  <section class="kiosk-screen" id="screen-pickup">
+    <div class="kiosk-panel">
+      <h2>📦 取件</h2>
+      <div class="login-bar" id="pickupUserBar" hidden>
+        <span id="pickupIdentity">👤 已登录</span>
+        <button class="btn sm ghost" onclick="logoutKiosk()">退出登录</button>
+      </div>
+      <div id="myPickupBox" hidden>
+        <label>您名下待取包裹 <span class="cap-stats" id="myPickupCount"></span></label>
+        <div class="pkg-list" id="myPickupList" style="margin-bottom:12px;"></div>
+      </div>
+      <p class="muted" style="text-align:center;">也可以直接输入 6 位取件码</p>
+      <div class="kform">
+        <label>取件码</label>
+        <input id="pickupInput" inputmode="numeric" maxlength="6" placeholder="如 123456" autocomplete="off" />
+        <div class="btn-row" style="justify-content:center;margin-top:16px;">
+          <button class="btn green" id="pickupSubmit" onclick="submitPickup()">取件</button>
+          <button class="btn ghost" onclick="go('home')">返回首页</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 快递员 ================= -->
+  <section class="kiosk-screen" id="screen-courier-home">
+    <div class="kiosk-panel">
+      <h2>🚚 快递员入口</h2>
+      <div class="login-bar">
+        <span id="courierIdentity">🚚 未登录</span>
+        <button class="btn sm ghost" onclick="logoutKiosk()">退出登录</button>
+      </div>
+      <div class="role-grid">
+        <button class="role-btn" onclick="go('store')">
+          <div class="rb-emoji">🗃️</div>
+          <div class="rb-title">存件</div>
+          <div class="rb-desc">送达件存入柜格口</div>
+        </button>
+        <button class="role-btn" onclick="go('collect')">
+          <div class="rb-emoji">📥</div>
+          <div class="rb-title">揽收</div>
+          <div class="rb-desc">收取用户待寄出的件</div>
+        </button>
+        <button class="role-btn" onclick="go('records')">
+          <div class="rb-emoji">🧾</div>
+          <div class="rb-title">投递记录</div>
+          <div class="rb-desc">查询经手包裹</div>
+        </button>
+      </div>
+      <div class="btn-row" style="justify-content:center;margin-top:16px;">
+        <button class="btn ghost" onclick="go('home')">返回首页</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 快递员登录（工号 + 手机号；也可在首页扫码登录） -->
+  <section class="kiosk-screen" id="screen-courier-login">
+    <div class="kiosk-panel">
+      <h2>🚚 快递员登录</h2>
+      <p class="muted" style="text-align:center;">工号 + 手机号，或在首页用手机扫码登录</p>
+      <div class="kform">
+        <div class="row2">
+          <div>
+            <label>工号</label>
+            <input id="courierLoginNo" maxlength="20" placeholder="如 E00001（演示账号）" style="text-transform:uppercase;" />
+          </div>
+          <div>
+            <label>手机号</label>
+            <input id="courierLoginPhone" inputmode="numeric" maxlength="11" placeholder="11 位手机号" />
+          </div>
+        </div>
+        <div class="btn-row" style="justify-content:center;margin-top:16px;">
+          <button class="btn green" id="courierLoginBtn" onclick="courierLogin()">登录</button>
+          <button class="btn ghost" onclick="go('home')">返回首页</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 存件（快递员） -->
+  <section class="kiosk-screen" id="screen-store">
+    <div class="kiosk-panel">
+      <h2>🗃️ 快递员存件</h2>
+      <div class="kform">
+        <label>当前快递员 <span class="cap-stats">来自登录身份，不可代选他人</span></label>
+        <input id="storeCourierShow" disabled value="未登录" />
+        <label style="margin-top:6px;">寄件单关联（可选）<span class="cap-stats">按订单号或收件人手机号匹配，自动带出收件人并锁定规格</span></label>
+        <div style="display:flex;gap:10px;">
+          <input id="storeSendCode" maxlength="20" placeholder="揽收码 / 运单号 / 收件人手机号" style="flex:1;" />
+          <button class="btn" style="flex:0 0 auto;" onclick="assocSend()">匹配</button>
+        </div>
+        <div id="storeSendAssoc" class="assoc-hint"></div>
+        <div class="row2">
+          <div>
+            <label>收件人手机号</label>
+            <input id="storePhone" inputmode="numeric" maxlength="11" placeholder="11 位手机号" />
+          </div>
+          <div>
+            <label>收件人姓名（可选）</label>
+            <input id="storeName" placeholder="如：张先生" />
+          </div>
+        </div>
+        <label>包裹规格 <span class="cap-stats" id="capStats">（剩余格口加载中…）</span></label>
+        <div class="size-select" id="storeSize">
+          <button type="button" data-size="SMALL" class="active">小件 ≤5kg<span class="cap-num">剩余 --</span></button>
+          <button type="button" data-size="MEDIUM">中件 ≤10kg<span class="cap-num">剩余 --</span></button>
+          <button type="button" data-size="LARGE">大件 ≤20kg<span class="cap-num">剩余 --</span></button>
+        </div>
+        <div class="row2">
+          <div>
+            <label>重量(kg，可选)</label>
+            <input id="storeWeight" inputmode="decimal" placeholder="如 2.5" />
+          </div>
+          <div>
+            <label>当前柜体</label>
+            <input id="storeCabinetShow" disabled value="加载中…" />
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:18px;">
+          <button class="btn green" id="storeBtn" onclick="submitStore()">确认存件</button>
+          <button class="btn ghost" onclick="go('courier-home')">返回</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 揽收（快递员） -->
+  <section class="kiosk-screen" id="screen-collect">
+    <div class="kiosk-panel">
+      <h2>📥 快递员揽收</h2>
+      <div class="kform">
+        <label>当前快递员</label>
+        <input id="collectCourierShow" disabled value="未登录" />
+        <label style="margin-top:6px;">待送记录（用户已下单、尚未揽收）<span class="cap-stats" id="collectCount"></span></label>
+        <div class="pkg-list" id="collectList"></div>
+        <div class="btn-row" style="justify-content:center;margin-top:14px;">
+          <button class="btn ghost" onclick="go('courier-home')">返回</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 投递记录（快递员） -->
+  <section class="kiosk-screen" id="screen-records">
+    <div class="kiosk-panel">
+      <h2>🧾 投递记录</h2>
+      <div class="kform">
+        <label>当前快递员</label>
+        <input id="recordsCourierShow" disabled value="未登录" />
+        <label style="margin-top:8px;">筛选条件（可留空，越少越宽）</label>
+        <div class="filter-row">
+          <input id="recordsPhone" placeholder="收件人手机号（支持部分）" maxlength="11" inputmode="numeric">
+          <select id="recordsStatus">
+            <option value="">全部状态</option>
+            <option value="SEND_COLLECTED">已揽收 · 未送达</option>
+            <option value="SEND_WAIT_PICKUP">待揽收</option>
+            <option value="SEND_CANCELLED">已撤回</option>
+            <option value="STORED">已存件</option>
+            <option value="PICKED">已取件</option>
+            <option value="EXPIRED">已超时</option>
+          </select>
+        </div>
+        <div class="filter-row">
+          <select id="recordsCabinet">
+            <option value="">全部柜体</option>
+          </select>
+          <select id="recordsDays">
+            <option value="" selected>全部时间</option>
+            <option value="1">最近 1 天</option>
+            <option value="7">最近 7 天</option>
+            <option value="30">最近 30 天</option>
+          </select>
+        </div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn" onclick="loadRecords()">查询</button>
+          <button class="btn ghost" onclick="go('courier-home')">返回</button>
+        </div>
+        <label>经手包裹 <span class="cap-stats" id="recordsCount"></span></label>
+        <div class="pkg-list" id="recordsList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 帮助 -->
+  <section class="kiosk-screen" id="screen-about">
+    <div class="kiosk-panel">
+      <h2>ℹ️ 使用帮助</h2>
+      <div class="help-cols">
+        <div>
+          <h3>📱 扫码取件（推荐）</h3>
+          <ul>
+            <li><b>第一步：</b>用手机相机（微信扫一扫亦可）扫描屏幕左侧二维码，打开手机取件页。</li>
+            <li><b>第二步：</b>手机上点「确认在本柜机取件」，柜机随即登录您的账号。</li>
+            <li><b>第三步：</b>柜机自动列出您名下的待取包裹，点「立即取件」即开柜；也可点「继续」进入取件页。</li>
+            <li><b>隐私：</b>柜机 2 分钟无操作自动退出登录，下一位用户不会看到您的包裹。</li>
+          </ul>
+        </div>
+        <div>
+          <h3>🔢 输码取件 / 🚚 快递员</h3>
+          <ul>
+            <li><b>输码取件：</b>没带手机时，在首页输入短信里的 6 位取件码即可开柜，无需登录。</li>
+            <li><b>超时保管费：</b>包裹超时后需先支付 ¥1.00，支付完成自动开柜。</li>
+            <li><b>快递员：</b>工号 + 手机号登录，或在首页扫码登录；可存件、揽收、查投递记录。</li>
+            <li><b>寄件 / 我的包裹 / 消息通知：</b>已迁至手机端，访问 <code>/m</code> 即可。</li>
+          </ul>
+        </div>
+      </div>
+      <ul style="line-height:2;color:var(--ink-2);">
+        <li><b>开柜引导：</b>取件成功后格口号高亮显示，并有 30 秒倒计时，可点击「重新开门」防止误关。</li>
+        <li><b>切换柜体：</b>左上角下拉可切换当前操作的快递柜，二维码与取件均以所选柜体为准。</li>
+      </ul>
+      <div class="btn-row" style="justify-content:center;margin-top:10px;">
+        <button class="btn ghost" onclick="go('home')">返回首页</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 通用结果弹层 -->
+  <div class="kiosk-modal" id="kioskModal">
+    <div class="km-card">
+      <div class="km-icon" id="kmIcon">✅</div>
+      <h3 id="kmTitle">操作成功</h3>
+      <div id="kmBody"></div>
+      <button class="btn" onclick="closeModal()">完成</button>
+    </div>
+  </div>
+
+  <!-- 超时扫码支付弹层 -->
+  <div class="kiosk-modal" id="payModal">
+    <div class="km-card pay-card">
+      <div class="pay-qr">📱</div>
+      <h3>超时保管费</h3>
+      <div class="pay-amount" id="payAmount">¥1.00</div>
+      <p class="muted" id="payDesc">请使用微信 / 支付宝扫码支付</p>
+      <div class="pay-progress" id="payProgress">等待支付…</div>
+      <div class="btn-row" style="justify-content:center;">
+        <button class="btn green" id="payConfirm" onclick="confirmPay()">✅ 我已支付</button>
+        <button class="btn ghost" onclick="closePay()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 开柜引导弹层 -->
+  <div class="kiosk-modal" id="doorModal">
+    <div class="km-card door-card">
+      <div class="door-icon">🔓</div>
+      <h3>取件成功 · 请取走物品</h3>
+      <div class="cell-highlight" id="doorCell">A-08</div>
+      <div class="door-info" id="doorInfo"></div>
+      <div class="countdown" id="doorCountdown">30</div>
+      <div class="countdown-label">秒后柜门自动关闭</div>
+      <button class="btn" id="doorReopen" onclick="reopenDoor()">🚪 防误关 · 重新开门</button>
+      <button class="btn ghost" onclick="closeDoor()">完成</button>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/kiosk.js"></script>
+</body>
+</html>

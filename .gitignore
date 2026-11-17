@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 运行产物与日志
+logs/*.log
+logs/shots/
+.workbuddy-ai/
+
+# 本地配置与密钥
+.env
+.env.*
+!.env.example
+*.local
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini

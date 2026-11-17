@@ -1,0 +1,105 @@
+/* 后台管理看板专用样式 */
+.admin-main { padding: 22px 26px; background: var(--bg); overflow-x: hidden; }
+.view { display: none; }
+.view.active { display: block; animation: fade .2s; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.sidebar a { user-select: none; }
+
+/* 工具栏 */
+.toolbar { display: flex; gap: 12px; margin-bottom: 14px; align-items: center; }
+.toolbar input { max-width: 280px; }
+.toolbar .btn { margin-left: auto; }
+
+/* 分页 */
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+.pager button {
+  border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 12px;
+  cursor: pointer; font-size: 13px; color: var(--ink-2);
+}
+.pager button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.pager button:disabled { opacity: .45; cursor: not-allowed; }
+.pager .info { margin-left: auto; color: var(--ink-3); font-size: 13px; }
+
+/* 表格内操作按钮 */
+td .btn { margin-right: 4px; }
+.nowrap { white-space: nowrap; }
+
+/* 弹窗 */
+.modal {
+  position: fixed; inset: 0; background: rgba(2,6,23,.5); display: none;
+  align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(3px);
+}
+.modal.show { display: flex; }
+.modal-card {
+  background: #fff; border-radius: 16px; padding: 26px; width: min(560px, 94vw);
+  max-height: 88vh; overflow-y: auto; box-shadow: var(--shadow-lg);
+}
+.modal-card h3 { margin: 0 0 16px; font-size: 18px; }
+.modal-card label { color: var(--ink-2); }
+
+/* KPI 图标 */
+.kpi .icon { font-size: 20px; }
+
+/* 公司排名表 */
+#companyRankTable table th, #companyRankTable table td { font-size: 13px; }
+
+/* 格子矩阵图 */
+.matrix-box { display: flex; flex-direction: column; gap: 18px; }
+.matrix-group { background: #f8fafc; border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.mg-title { font-size: 14px; font-weight: 800; color: var(--ink-2); margin-bottom: 10px; }
+.cell-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.cell-block {
+  position: relative; width: 76px; height: 64px; border-radius: 12px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: .15s;
+  border: 2px solid transparent; color: #fff; font-weight: 800;
+}
+.cell-block:hover { transform: translateY(-3px) scale(1.04); box-shadow: var(--shadow); border-color: #0f172a; }
+.cb-code { font-size: 16px; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.cb-dot {
+  position: absolute; top: 4px; right: 6px; font-size: 12px; background: #fde047; color: #713f12;
+  border-radius: 6px; padding: 0 4px; font-weight: 900;
+}
+.cell-block.free    { background: #22c55e; }
+.cell-block.stored  { background: #ef4444; }
+.cell-block.expired { background: #8b5cf6; }
+.cell-block.fault   { background: #eab308; color: #422006; }
+.legend { display: flex; gap: 14px; align-items: center; font-size: 13px; color: var(--ink-2); margin-left: auto; }
+.legend .lg { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: middle; margin-right: 4px; }
+.legend .lg.free { background: #22c55e; }
+.legend .lg.stored { background: #ef4444; }
+.legend .lg.expired { background: #8b5cf6; }
+.legend .lg.fault { background: #eab308; }
+
+/* 格口详情抽屉 */
+.drawer { position: fixed; inset: 0; z-index: 300; display: none; }
+.drawer.show { display: block; }
+.drawer-mask { position: absolute; inset: 0; background: rgba(2,6,23,.45); }
+.drawer-panel {
+  position: absolute; top: 0; right: 0; height: 100%; width: min(400px, 92vw);
+  background: #fff; box-shadow: -20px 0 60px rgba(0,0,0,.25); padding: 26px;
+  animation: slidein .25s ease; overflow-y: auto;
+}
+@keyframes slidein { from { transform: translateX(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+.drawer-close {
+  position: absolute; top: 16px; right: 18px; border: none; background: none; font-size: 20px;
+  cursor: pointer; color: var(--ink-3);
+}
+.drawer-panel h3 { margin: 0 0 16px; font-size: 18px; }
+.drawer-row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.drawer-row span { color: var(--ink-3); }
+.drawer-row b { color: var(--ink-1); }
+.drawer-panel .btn.danger { width: 100%; margin-top: 18px; }
+
+/* 通知中心：状态徽标 */
+.badge.s-PENDING { background: #fef3c7; color: #b45309; }
+.badge.s-SENT    { background: #dcfce7; color: #15803d; }
+.badge.s-FAILED  { background: #fee2e2; color: #b91c1c; }
+.badge.s-DEAD    { background: #e2e8f0; color: #475569; }
+.badge.STORE_ARRIVAL      { background: #dbeafe; color: #1d4ed8; }
+.badge.SEND_ORDER_CREATED { background: #cffafe; color: #0e7490; }
+.badge.SEND_COLLECTED     { background: #ccfbf1; color: #0f766e; }
+.badge.PICKUP_REMIND      { background: #fef3c7; color: #b45309; }
+.badge.EXPIRE_URGE        { background: #fee2e2; color: #b91c1c; }
+.badge.EXCEPTION_ALERT    { background: #ede9fe; color: #6d28d9; }
+.badge.PICKUP_RECEIPT     { background: #dcfce7; color: #15803d; }

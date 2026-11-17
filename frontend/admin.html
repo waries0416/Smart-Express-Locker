@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>后台管理看板 · 智能快递柜管理系统</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">📦 智能快递柜管理系统 <small>后台管理看板</small></div>
+    <div class="spacer"></div>
+    <nav class="nav">
+      <a href="/admin/dashboard" class="active">后台看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-left:14px;">
+      <span id="whoami" style="font-size:13px;color:#cbd5e1;"></span>
+      <button class="btn sm ghost" onclick="doLogout()">退出登录</button>
+    </div>
+  </header>
+
+  <script>
+    // 登录守卫：页面本身已由后端 Cookie 会话门禁拦截（未登录直接 302 到登录页），
+    // 这里只做两件事：过期时兜底跳转、把当前管理员姓名填到右上角。
+    const ADMIN_BASE = location.pathname.replace(/\/$/, "").replace(/\/(login|dashboard)$/, "");
+    const ADMIN_LOGIN = ADMIN_BASE + "/login";
+
+    (async function guard() {
+      try {
+        const res = await fetch("/api/auth/verify", { credentials: "same-origin" });
+        if (!res.ok) { location.replace(ADMIN_LOGIN); return; }
+        const r = await res.json();
+        const el = document.getElementById("whoami");
+        if (el && r.user) el.textContent = `👤 ${r.user.name}（${r.user.role}）`;
+      } catch (e) {
+        location.replace(ADMIN_LOGIN);
+      }
+    })();
+
+    async function doLogout() {
+      if (!confirm("确认退出登录？")) return;
+      try {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+      } catch (e) { /* 清 Cookie 失败也继续跳转，页面门禁会再次拦截 */ }
+      location.replace(ADMIN_LOGIN);
+    }
+  </script>
+
+  <div class="admin-layout">
+    <aside class="sidebar">
+      <div class="brand">⚙️ 管理控制台</div>
+      <a class="active" data-view="dashboard" onclick="switchView('dashboard')">📊 数据看板</a>
+      <a data-view="biz" onclick="switchView('biz')">🔄 业务操作</a>
+      <a data-view="notices" onclick="switchView('notices')">🔔 通知中心</a>
+      <a data-view="companies" onclick="switchView('companies')">🏢 快递公司</a>
+      <a data-view="couriers" onclick="switchView('couriers')">🚚 快递员</a>
+      <a data-view="users" onclick="switchView('users')">👤 用户</a>
+      <a data-view="cabinets" onclick="switchView('cabinets')">🗄️ 快递柜</a>
+      <a data-view="cells" onclick="switchView('cells')">🔲 格口</a>
+      <a data-view="matrix" onclick="switchView('matrix')">🧊 格子矩阵</a>
+      <a data-view="packages" onclick="switchView('packages')">📦 包裹</a>
+      <div class="spacer"></div>
+      <div class="foot">数据库：smart_locker<br/>后端：Flask + MySQL</div>
+    </aside>
+
+    <main class="admin-main">
+      <!-- ============ 看板 ============ -->
+      <section class="view active" id="view-dashboard">
+        <div class="section-title">数据看板 · 实时概览</div>
+        <div class="kpis" id="kpis"></div>
+
+        <div class="grid cols-2" style="margin-top:18px;">
+          <div class="card">
+            <h3><span class="bar"></span>包裹状态分布</h3>
+            <div class="chart-box"><canvas id="chartStatus"></canvas></div>
+          </div>
+          <div class="card">
+            <h3><span class="bar"></span>各柜体吞吐量（Top 10）</h3>
+            <div class="chart-box"><canvas id="chartThroughput"></canvas></div>
+          </div>
+        </div>
+        <div class="grid cols-2" style="margin-top:18px;">
+          <div class="card">
+            <h3><span class="bar"></span>近 14 天存取趋势</h3>
+            <div class="chart-box"><canvas id="chartTrend"></canvas></div>
+          </div>
+          <div class="card">
+            <h3><span class="bar"></span>异常类型分布</h3>
+            <div class="chart-box"><canvas id="chartExc"></canvas></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:18px;">
+          <h3><span class="bar"></span>各快递公司存件量 / 超时率排名</h3>
+          <div class="table-wrap" id="companyRankTable"></div>
+        </div>
+      </section>
+
+      <!-- ============ 业务操作 ============ -->
+      <section class="view" id="view-biz">
+        <div class="section-title">业务操作 · 管理员专属</div>
+        <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+          存件、取件、寄件、揽收等日常业务请在
+          <a href="/" style="color:var(--primary);font-weight:700;">快递柜触屏端</a>
+          按角色操作；此处仅保留管理员对包裹流转的干预处理。
+        </p>
+        <div class="card">
+          <h3><span class="bar"></span>① 包裹流转管理（超时 / 异常 / 退回）</h3>
+          <div class="row2" style="align-items:end;">
+            <div><label>包裹 ID</label><input id="bizPkgId" type="number" placeholder="输入包裹 package_id" /></div>
+            <div class="btn-row">
+              <button class="btn" onclick="bizForceExpire()">强制超时</button>
+              <button class="btn danger" onclick="bizReturn()">退回快递员</button>
+              <button class="btn ghost" onclick="bizException()">登记异常</button>
+            </div>
+          </div>
+          <div class="row2" style="margin-top:10px;">
+            <div><label>异常类型</label>
+              <select id="bizExcType">
+                <option value="DAMAGED">破损 DAMAGED</option>
+                <option value="WRONG_CELL">错格 WRONG_CELL</option>
+                <option value="OVERWEIGHT">超重 OVERWEIGHT</option>
+                <option value="MISSED">漏取 MISSED</option>
+                <option value="TIMEOUT">超时 TIMEOUT</option>
+              </select>
+            </div>
+            <div><label>备注</label><input id="bizExcRemark" placeholder="可选" /></div>
+          </div>
+          <div id="bizFlowResult" class="muted" style="margin-top:10px;"></div>
+        </div>
+      </section>
+
+      <!-- ============ 实体 CRUD 容器 ============ -->
+      <!-- ============ 通知中心 ============ -->
+      <section class="view" id="view-notices">
+        <div class="section-title">通知中心 · 消息流水与投递状态</div>
+        <p class="muted" style="margin:-6px 0 14px;font-size:13px;">
+          存件、揽收、超时催取、异常等事件会自动生成通知，由后台线程异步投递到
+          短信 / 站内消息 / 外部推送。同一事件的同一渠道只会保留一条记录（幂等），
+          投递失败按 30s → 2min → 10min 退避重试，超过上限转入死信。
+        </p>
+
+        <div class="kpis" id="noticeKpis"></div>
+
+        <div class="card" style="margin-top:16px;">
+          <h3><span class="bar"></span>按类型 / 状态 / 渠道筛选</h3>
+          <div class="toolbar">
+            <select id="noticeType" onchange="loadNotices(1)">
+              <option value="">全部类型</option>
+            </select>
+            <select id="noticeStatus" onchange="loadNotices(1)">
+              <option value="">全部状态</option>
+              <option value="PENDING">待发送</option>
+              <option value="SENT">已发送</option>
+              <option value="FAILED">发送失败</option>
+              <option value="DEAD">已放弃</option>
+            </select>
+            <select id="noticeChannel" onchange="loadNotices(1)">
+              <option value="">全部渠道</option>
+              <option value="SMS">短信</option>
+              <option value="INBOX">站内消息</option>
+              <option value="PUSH">外部推送</option>
+            </select>
+            <input id="noticePhone" placeholder="按手机号查询" oninput="loadNotices(1)" />
+            <div class="btn-row" style="margin-left:auto;">
+              <button class="btn" onclick="scanNotices()">扫描超时件</button>
+              <button class="btn" onclick="dispatchNotices()">立即投递</button>
+              <button class="btn ghost" onclick="openTestNotice()">发测试通知</button>
+            </div>
+          </div>
+          <div class="table-wrap"><table id="table-notices"></table></div>
+          <div class="pager" id="pager-notices"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-companies">
+        <div class="section-title">快递公司管理</div>
+        <div class="card">
+          <div class="toolbar">
+            <input id="search-companies" placeholder="搜索公司名 / 编码" oninput="loadEntity('companies')" />
+            <button class="btn" onclick="openForm('companies')">+ 新增公司</button>
+          </div>
+          <div class="table-wrap"><table id="table-companies"></table></div>
+          <div class="pager" id="pager-companies"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-couriers">
+        <div class="section-title">快递员管理</div>
+        <div class="card">
+          <div class="toolbar">
+            <input id="search-couriers" placeholder="搜索姓名 / 工号 / 手机" oninput="loadEntity('couriers')" />
+            <button class="btn" onclick="openForm('couriers')">+ 新增快递员</button>
+          </div>
+          <div class="table-wrap"><table id="table-couriers"></table></div>
+          <div class="pager" id="pager-couriers"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-users">
+        <div class="section-title">用户管理</div>
+        <div class="card">
+          <div class="toolbar">
+            <input id="search-users" placeholder="搜索姓名 / 手机" oninput="loadEntity('users')" />
+            <button class="btn" onclick="openForm('users')">+ 新增用户</button>
+          </div>
+          <div class="table-wrap"><table id="table-users"></table></div>
+          <div class="pager" id="pager-users"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-cabinets">
+        <div class="section-title">快递柜管理</div>
+        <div class="card">
+          <div class="toolbar">
+            <input id="search-cabinets" placeholder="搜索位置 / 编码" oninput="loadEntity('cabinets')" />
+            <button class="btn" onclick="openForm('cabinets')">+ 新增快递柜</button>
+          </div>
+          <div class="table-wrap"><table id="table-cabinets"></table></div>
+          <div class="pager" id="pager-cabinets"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-cells">
+        <div class="section-title">格口管理</div>
+        <div class="card">
+          <div class="toolbar">
+            <input id="search-cells" placeholder="搜索格口号 / 规格 / 状态" oninput="loadEntity('cells')" />
+            <button class="btn" onclick="openForm('cells')">+ 新增格口</button>
+          </div>
+          <div class="table-wrap"><table id="table-cells"></table></div>
+          <div class="pager" id="pager-cells"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-packages">
+        <div class="section-title">包裹管理 · 两类记录查询</div>
+        <div class="card">
+          <div class="toolbar" style="flex-wrap:wrap;">
+            <input id="search-packages" placeholder="搜索运单号 / 取件码 / 状态" oninput="loadEntity('packages')" />
+            <select id="pkgDirection" onchange="loadEntity('packages')">
+              <option value="">全部方向</option>
+              <option value="RECEIVE">收件</option>
+              <option value="SEND">寄件</option>
+            </select>
+            <select id="pkgStatus" onchange="loadEntity('packages')">
+              <option value="">全部状态</option>
+              <option value="STORED">待取件(已存)</option>
+              <option value="EXPIRED">超时未取</option>
+              <option value="SEND_WAIT_PICKUP">待送(待揽收)</option>
+              <option value="SEND_COLLECTED">已揽收</option>
+              <option value="PICKED">已取/完成</option>
+              <option value="EXCEPTION">异常</option>
+              <option value="RETURNED">已退回</option>
+            </select>
+            <select id="pkgCourier" title="揽收快递员（对待送件执行揽收时使用）">
+              <option value="">揽收快递员(未选)</option>
+            </select>
+            <button class="btn" onclick="openForm('packages')">+ 新增包裹</button>
+          </div>
+          <div class="toolbar" style="margin-top:8px;">
+            <span class="muted" style="font-size:12px;">快捷：</span>
+            <button class="btn sm ghost" onclick="pkgQuick('','')">全部</button>
+            <button class="btn sm ghost" onclick="pkgQuick('RECEIVE','STORED')">待取件记录</button>
+            <button class="btn sm ghost" onclick="pkgQuick('SEND','SEND_WAIT_PICKUP')">待送记录(待揽收)</button>
+            <button class="btn sm ghost" onclick="pkgQuick('SEND','SEND_COLLECTED')">已揽收</button>
+          </div>
+          <div class="table-wrap"><table id="table-packages"></table></div>
+          <div class="pager" id="pager-packages"></div>
+        </div>
+      </section>
+
+      <!-- ============ 格子矩阵 ============ -->
+      <section class="view" id="view-matrix">
+        <div class="section-title">格子矩阵图 · 柜体物理视图</div>
+        <div class="card">
+          <div class="toolbar">
+            <label style="margin:0 8px 0 0;">选择柜体</label>
+            <select id="matrixCabinet" onchange="loadMatrix()"></select>
+            <span class="legend">
+              <i class="lg free"></i>空闲
+              <i class="lg stored"></i>待取
+              <i class="lg expired"></i>超期
+              <i class="lg fault"></i>故障
+            </span>
+          </div>
+          <div id="matrixBox" class="matrix-box"><div class="empty">加载中…</div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 格口详情抽屉 -->
+  <div class="drawer" id="cellDrawer">
+    <div class="drawer-mask" onclick="closeDrawer()"></div>
+    <div class="drawer-panel">
+      <button class="drawer-close" onclick="closeDrawer()">✕</button>
+      <h3 id="drawerTitle">格口详情</h3>
+      <div id="drawerBody"></div>
+      <button class="btn danger" id="drawerForce" onclick="drawerForceUnlock()">🛠 远程强制开锁</button>
+    </div>
+  </div>
+
+  <!-- 表单弹窗 -->
+  <div class="modal" id="formModal">
+    <div class="modal-card">
+      <h3 id="formTitle">编辑</h3>
+      <div id="formFields"></div>
+      <div class="btn-row" style="justify-content:flex-end;margin-top:18px;">
+        <button class="btn ghost" onclick="closeForm()">取消</button>
+        <button class="btn" id="formSaveBtn" onclick="saveForm()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/lib/chart.umd.min.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>
