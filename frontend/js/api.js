@@ -1,34 +1,31 @@
 // 前端 API 客户端 —— 与后端 Flask REST API 通信（同源 /api）
+// 网络层（超时 / 鉴权头 / loading / 错误归一化）在 api-core.js 的 ApiCore 里，
+// 本文件只负责"有哪些接口、路径怎么拼"，三端共用同一套网络行为。
 const API = {
   base: "/api",
 
-  async request(method, path, body, extraHeaders = {}) {
-    const opts = { method, headers: { ...extraHeaders } };
-    if (body !== undefined) {
-      opts.headers["Content-Type"] = "application/json";
-      opts.body = JSON.stringify(body);
-    }
-    const res = await fetch(this.base + path, opts);
-    let data = null;
-    try {
-      data = await res.json();
-    } catch (e) {
-      data = null;
-    }
-    if (!res.ok) {
-      const msg = (data && (data.error || data.message)) || `请求失败 (${res.status})`;
-      const err = new Error(msg);
-      err.status = res.status; // 便于调用方区分 409 引用冲突
-      err.data = data;
-      throw err;
-    }
-    return data;
+  // 默认超时：新增的 AI / 地图 / 支付接口在弱网下可能较慢，
+  // 统一 20s 兜底，避免按钮永久卡在 loading（AI 冷启动首包偶尔 >10s）。
+  defaultTimeout: 20000,
+  // token 来源可插拔：触屏/管理端用 sessionStorage，手机端由 app.js 注入 localStorage 读取器
+  tokenProvider: null,
+  setTokenProvider(fn) {
+    this.tokenProvider = fn;
+    ApiCore.setTokenProvider(fn);
   },
 
-  get(path) { return this.request("GET", path); },
-  post(path, body) { return this.request("POST", path, body); },
-  put(path, body) { return this.request("PUT", path, body); },
-  del(path) { return this.request("DELETE", path); },
+  // 统一鉴权头（委托 ApiCore，保证三端行为一致）
+  authHdr() { return ApiCore.authHdr(); },
+
+  /** 统一请求入口（委托 ApiCore.request，异常标记见 api-core.js） */
+  request(method, path, body, extraHeaders = {}, opts = {}) {
+    return ApiCore.request(method, path, body, extraHeaders, opts);
+  },
+
+  get(path, opts) { return this.request("GET", path, undefined, {}, opts); },
+  post(path, body, opts) { return this.request("POST", path, body, {}, opts); },
+  put(path, body, opts) { return this.request("PUT", path, body, {}, opts); },
+  del(path, opts) { return this.request("DELETE", path, undefined, {}, opts); },
 
   // 实体 CRUD
   list(entity, params = {}) {
@@ -54,10 +51,8 @@ const API = {
   kioskLogin(payload) { return this.post("/auth/kiosk-login", payload); },
   // 触屏端用户自助注册（姓名+手机号；注册成功即自动登录并签发 token）
   kioskRegister(payload) { return this.post("/auth/kiosk-register", payload); },
-  kioskVerify() {
-    return this.request("GET", "/auth/kiosk-verify", undefined,
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
-  },
+  // 鉴权头由 ApiCore.authHdr() 统一注入（见文件末尾 setTokenProvider），这里不再手写
+  kioskVerify() { return this.get("/auth/kiosk-verify"); },
 
   // 手机端：取件二维码深链（柜机屏展示，手机系统相机扫）
   baseUrl() { return this.get("/m/base-url"); },
@@ -99,19 +94,14 @@ const API = {
   // 寄件全程追踪（登录态优先查本人；未登录时支持 订单号 / 手机号）
   sendTrack(params = {}) {
     const qs = new URLSearchParams(params).toString();
-    return this.request("GET", `/business/send-track${qs ? "?" + qs : ""}`, undefined,
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
+    return this.get(`/business/send-track${qs ? "?" + qs : ""}`);
   },
 
   // 用户端：我的包裹记录查询（登录身份，服务端按 user_id 过滤，仅本人可见）
-  myPackages() {
-    return this.request("GET", "/business/my-packages", undefined,
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
-  },
+  myPackages() { return this.get("/business/my-packages"); },
   // 用户撤回寄件（仅本人、仅待揽收状态）
   cancelSendOrder(id) {
-    return this.request("POST", `/business/send-orders/${id}/cancel`, undefined,
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
+    return this.post(`/business/send-orders/${id}/cancel`, undefined);
   },
 
   // 触屏：批量取件 / 超时支付 / 开柜
@@ -124,8 +114,7 @@ const API = {
   myPickup(cabinet) {
     const q = new URLSearchParams();
     if (cabinet) q.set("cabinet", cabinet);
-    return this.request("GET", `/business/my-pickup?${q}`, undefined,
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
+    return this.get(`/business/my-pickup?${q}`);
   },
   payOvertime(ids) { return this.post("/business/pay-overtime", { package_ids: ids }); },
   unlock(id, cabinet) { return this.post("/business/unlock", { package_id: id, cabinet_id: cabinet }); },
@@ -155,25 +144,13 @@ const API = {
   },
   notifyStats() { return this.get("/notify/stats"); },
   // 用户站内消息（凭登录身份拉取，消息绑定账号，精确送达）
-  inboxToken(size = 20) {
-    return this.request("GET", `/notify/inbox?size=${size}`, undefined,
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
-  },
+  inboxToken(size = 20) { return this.get(`/notify/inbox?size=${size}`); },
   // 站内信标记已读（按登录账号，全部置为已读）
-  markInboxReadToken() {
-    return this.request("POST", "/notify/inbox/read", {},
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
-  },
+  markInboxReadToken() { return this.post("/notify/inbox/read", {}); },
   // 单条站内信标记已读（消息列表每条消息的「标为已读」按钮）
-  markInboxReadOne(id) {
-    return this.request("POST", `/notify/inbox/${id}/read`, {},
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
-  },
+  markInboxReadOne(id) { return this.post(`/notify/inbox/${id}/read`, {}); },
   // 未读站内信计数（触屏轮询：红点角标 + 新通知到达增量提示）
-  noticeUnreadCount() {
-    return this.request("GET", "/notify/inbox/unread", undefined,
-      { Authorization: "Bearer " + (sessionStorage.getItem("kiosk_token") || "") });
-  },
+  noticeUnreadCount() { return this.get("/notify/inbox/unread"); },
   // 手动重投单条（死信也能复活）
   retryNotice(id) { return this.post(`/notify/${id}/retry`); },
   // 手动触发一次超时扫描 / 一次投递（演示用，不用等 worker 轮询）
@@ -181,7 +158,98 @@ const API = {
   dispatchNotices() { return this.post("/notify/dispatch"); },
   // 发一条测试通知，验证渠道连通
   testNotice(payload) { return this.post("/notify/test", payload); },
+
+  // ============================================================
+  // 创新能力接口（AI 包装推荐 / AI 问答 / 地图找柜 / 支付 / 备包装）
+  // ------------------------------------------------------------
+  // 契约来源：Lead 确认版（docs/api-innovations.md 为准）。
+  // 约定：AI 类接口的 source 只会是 "deepseek" | "rule"；
+  //       支付类接口的 mock 为布尔、provider_label 由后端给中文文案，前端直接展示。
+  // ============================================================
+
+  // ---- AI 包装推荐（手机端"描述你的物品"） ----
+  // 返回：{source, degraded, elapsed_ms, forbidden[], sensitive[],
+  //        packaging[], size_type, size_reason, materials[], notice}
+  aiPackRecommend(description) {
+    return this.post("/ai/pack-recommend", { description }, { timeout: 30000 });
+  },
+  // AI 能力健康度：{provider, configured, mode:"deepseek"|"rule"}
+  aiHealth() { return this.get("/ai/health", { timeout: 8000 }); },
+  // AI 问答：{source, reply, session_id, elapsed_ms}
+  aiChat(message, sessionId) {
+    const body = { message };
+    if (sessionId) body.session_id = sessionId;
+    return this.post("/ai/chat", body, { timeout: 30000 });
+  },
+
+  // ---- 地图找柜 ----
+  // 在既有 /cabinets/nearby 基础上增补 latitude/longitude/distance_m
+  nearbyCabinets(params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v !== undefined && v !== null)
+    ).toString();
+    return this.get(`/cabinets/nearby${qs ? "?" + qs : ""}`);
+  },
+  // 高德 JS API 配置：{provider, js_key, security_js_code, configured}
+  // 仅下发公开客户端 key，私有 Key 永远在后端。
+  mapConfig() { return this.get("/map/config", { timeout: 8000 }); },
+
+  // ---- 支付 ----
+  // 创建支付单：body 只传 biz_type / biz_id / provider，金额与状态一律以查询为准
+  payCreate(payload) { return this.post("/pay/create", payload, { timeout: 15000 }); },
+  // 查询支付单：前端轮询此接口拿最终状态，不本地判定成功
+  payStatus(payId) { return this.get(`/pay/${payId}`, { timeout: 10000 }); },
+  // 仅 mock 模式可用：把支付单直接置为成功（演示用）
+  payMockSucceed(payId) { return this.post(`/pay/${payId}/mock-succeed`, {}, { timeout: 10000 }); },
+  // 管理端支付流水
+  payRecords(params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v !== undefined && v !== null)
+    ).toString();
+    return this.get(`/pay/records${qs ? "?" + qs : ""}`);
+  },
+
+  // ---- 备包装清单（材料台账，契约 §2.1） ----
+  // 权限：COURIER 或 admin；返回 {data:[{material_id,name,spec,stock,threshold,unit}]}
+  packMaterials() { return this.get("/pack-materials", { timeout: 10000 }); },
+  // 只接受 stock / threshold 两个字段，其余字段后端忽略（契约 §2.1）
+  updatePackMaterial(id, payload) {
+    return this.put(`/pack-materials/${id}`, payload, { timeout: 10000 });
+  },
+
+  // ---- 快递员备包装任务（契约 §2.2） ----
+  // 权限：COURIER（只看本人）或 admin；params 支持 status(PENDING|DONE|CANCELED)/page/size
+  packagingTasks(params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v !== undefined && v !== null)
+    ).toString();
+    return this.get(`/courier/packaging-tasks${qs ? "?" + qs : ""}`, { timeout: 12000 });
+  },
+  // 完成备包装任务：note 可选、<=200 字；非本人 403、已完成/已取消 409
+  packagingTaskDone(taskId, note) {
+    const body = note ? { note } : {};
+    return this.post(`/courier/packaging-tasks/${taskId}/done`, body, { timeout: 12000 });
+  },
+
+  // ---- 地址解析（契约 §3.3） ----
+  // 二选一：address（1–200 字） 或 lat+lng（逆地理编码）
+  // 无 AMAP_WEB_KEY / 无网络时后端仍返回 200 + degraded:true + provider:"local"
+  locationResolve(params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v !== undefined && v !== null)
+    ).toString();
+    return this.get(`/location/resolve?${qs}`, { timeout: 12000 });
+  },
 };
+
+/* ------------------------------------------------------------------
+ * 三端共用能力的便捷别名：真实实现都在 api-core.js 的 ApiCore 里。
+ * 这里只做转发，保持触屏端/管理端既有调用写法（withLoading(...) 等）不变。
+ * ------------------------------------------------------------------ */
+function withLoading(btn, loadingText, fn) {
+  return ApiCore.withLoading(btn, loadingText, fn);
+}
+function apiErrText(e) { return ApiCore.errText(e); }
 
 // 友好的错误提示（duration 可指定停留毫秒数，重要警告建议加长）
 function toast(msg, type = "info", duration = 2600) {

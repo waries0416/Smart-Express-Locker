@@ -20,6 +20,17 @@ import argparse
 import os
 import sys
 
+# Windows 下 stdout 被重定向（或控制台仍停留在 GBK/cp936）时，print("¥") 会抛
+# UnicodeEncodeError 直接中断脚本——答辩现场"准备演示数据"这一步因此失败过。
+# 统一把 stdout/stderr 切到 UTF-8，并留 errors="replace" 兜底：此后任何符号都不会
+# 再让脚本中途崩掉（Python 3.6+ 挂在真实控制台上时本就是 UTF-8，这里是 no-op；
+# 被重定向时则把输出写成 UTF-8，用 `type`/编辑器打开都能正常显示）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):   # 流被替换/不支持重配置时保持原样，不阻断主流程
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
 

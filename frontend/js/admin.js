@@ -11,6 +11,10 @@ function switchView(view) {
   // 每次切到矩阵视图都重新拉取柜体列表：可能在其他视图刚做过柜体增删
   if (view === "matrix") loadMatrixInit(true);
   if (["companies","couriers","users","cabinets","cells","packages"].includes(view)) loadEntity(view);
+  // 创新功能视图（定义在 admin-innovations.js）
+  if (view === "coords" && typeof loadCoords === "function") loadCoords();
+  if (view === "materials" && typeof loadMaterials === "function") loadMaterials();
+  if (view === "payments" && typeof loadPayments === "function") loadPayments(1);
 }
 
 // ---- 数据看板 ----

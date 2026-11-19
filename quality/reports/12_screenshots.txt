@@ -1,0 +1,17 @@
+OK 01_kiosk_home        screen=- text=668 nodes=345
+OK 02_mobile_login      screen=screen-login text=102 nodes=316
+OK 03_kiosk_ai          screen=- text=668 nodes=350
+OK 04_kiosk_pickup      screen=- text=668 nodes=345
+!! 05_mobile_pickup     screen=screen-login text=11 nodes=316 ⚠目标界面未激活
+OK 06_ai_recommend      screen=screen-ai text=506 nodes=520
+OK 07_map_nearby        screen=screen-map text=1895 nodes=879
+OK 08_payment           screen=screen-pay text=167 nodes=489
+OK 09_admin_login       screen=- text=65 nodes=29
+OK 10_admin_dashboard   screen=- text=1228 nodes=651
+OK 11_admin_packages    screen=- text=2517 nodes=956
+
+共 11 张，问题 1 个；元数据: D:\softwaretest\evidence\screenshots\_capture_log.json
+ 浏览器 : C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+ node   : D:\javaTeach\teach\web\nodejs\node.EXE
+ 服务   : http://127.0.0.1:5000 health=200
+ 执行   : D:\javaTeach\teach\web\nodejs\node.EXE D:\softwaretest\tools\capture_cdp.js --base http://127.0.0.1:5000 --out D:\softwaretest\evidence\screenshots --port 9337 --browser C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe

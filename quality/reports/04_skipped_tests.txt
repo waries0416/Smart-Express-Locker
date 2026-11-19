@@ -1,0 +1,13 @@
+# 跳过项清单 · 数据源：02_unittest_run1.txt（逐行 grep 'skipped'）
+
+实际执行用例数(Ran) : 202
+跳过(skipped)       : 0
+失败(FAIL)          : 0
+错误(ERROR)         : 0
+
+## 被跳过用例
+  本次运行 skipped = 0，无跳过用例。
+
+  说明：测试里的整类跳过条件是 skipUnless(_db_ready())，即 MySQL 不可用时整类跳过；
+  本机 MySQL 8.0.39 可用，故未触发。R8 新增的 5 条 R8 回归用例
+  也已真实执行（屏蔽 cryptography 的场景），不是 skip。

@@ -1,0 +1,34 @@
+==============================================================================
+ cProfile 固定场景 · 智能快递柜管理系统
+==============================================================================
+ Python      : 3.12.14
+ 仓库根      : D:\softwaretest
+ 场景柜体    : CAB-001 (id=1)
+ 场景快递员  : courier_id=1
+ 参数        : orders=30 repeat=3 top=25
+
+--- 预热（结果不计入统计）---
+
+--- 场景耗时（本机实测，单位 ms）---
+S1 批量寄件下单              n=30   平均=   11.31ms  中位=    6.58ms  P95=   19.71ms  min=   5.10ms  max=   57.22ms (30 条)
+S2 包装推荐(AI)            n=3    平均=    4.92ms  中位=    4.96ms  P95=    5.72ms  min=   4.07ms  max=    5.72ms (含外部调用，波动大)
+S3 附近柜体查询              n=5    平均=    4.27ms  中位=    4.34ms  P95=    4.50ms  min=   3.89ms  max=    4.50ms (30 柜 × 720 格口聚合)
+S4 寄件待揽收列表             n=5    平均=    3.99ms  中位=    3.98ms  P95=    4.19ms  min=   3.71ms  max=    4.19ms 
+S5 取件主链路               n=5    平均=    8.23ms  中位=    7.44ms  P95=   11.46ms  min=   7.05ms  max=   11.46ms (含触发器释放格口)
+
+--- 原始 profile 已保存: D:\softwaretest\quality\reports\perf\perf.prof ---
+    打开方式: python -m pstats quality/reports/perf/perf.prof
+              或 snakeviz quality/reports/perf/perf.prof
+
+--- pstats 报告 ---
+    tottime : D:\softwaretest\quality\reports\perf\perf_tottime.txt
+    cumtime : D:\softwaretest\quality\reports\perf\perf_cumtime.txt
+    calls   : D:\softwaretest\quality\reports\perf\perf_calls.txt
+    callers : D:\softwaretest\quality\reports\perf\perf_callers.txt
+    热点函数 : <method 'read' of '_ssl._SSLSocket' objects>  (~:0)
+               自身耗时 0.3011s，调用 1114 次
+
+--- 结论 ---
+{'S1': 30, 'S2': 3, 'S3': 5, 'S4': 5, 'S5': 5}
+
+摘要已写入: D:\softwaretest\quality\reports\perf\perf_summary.txt

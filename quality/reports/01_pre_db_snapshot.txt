@@ -1,0 +1,19 @@
+# 测试前的库状态快照（只读查询，不做任何写入）
+# 采集时间: 2026-11-19T01:37:16+08:00
+
+表名                    中文说明              行数
+------------------------------------------------------------
+t_cabinet               柜体               30
+t_cell                  格口               720
+t_user                  用户               161
+t_package               包裹               314
+t_courier               快递员              60
+t_express_company       快递公司             30
+t_pay_order             支付单              5
+t_pack_task             备包装任务            0
+t_pack_recommendation   AI 推荐记录          5540
+t_notice                通知               328
+t_exception_log         异常流水             270
+t_pickup_record         取件流水             234
+------------------------------------------------------------
+核心对照表: t_cabinet=30  t_cell=720  t_user=161  t_package=314

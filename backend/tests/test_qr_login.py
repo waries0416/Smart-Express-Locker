@@ -17,6 +17,7 @@ import unittest
 os.environ.setdefault("NOTIFY_WORKER", "0")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests import _guard  # noqa: E402,F401  进程级测试互斥（见 tests/_guard.py）
 import app as app_module  # noqa: E402
 import db  # noqa: E402
 

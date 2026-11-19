@@ -19,6 +19,12 @@ import auth  # noqa: E402
 import notify  # noqa: E402
 import mobile_api  # noqa: E402
 import qr_login  # noqa: E402
+# ---- 四组创新功能（docs/api-innovations.md）----
+# 每个创新点一个成员模块 + 一个蓝图，互不依赖，便于单独降级与单测。
+import assistant_api  # noqa: E402  创新点 1：/api/ai/*
+import location      # noqa: E402  创新点 3：/api/map/*、/api/location/*
+import payment_api   # noqa: E402  创新点 4：/api/pay/*
+import packaging_tasks  # noqa: E402 创新点 2：/api/pack-materials、/api/courier/*
 
 app = Flask(__name__, static_folder=None)
 
@@ -71,6 +77,11 @@ app.register_blueprint(notify.notify_bp)
 app.register_blueprint(mobile_api.mobile_bp)
 app.register_blueprint(mobile_api.device_bp)
 app.register_blueprint(qr_login.qr_bp)
+# 四组创新功能蓝图（docs/api-innovations.md §1–§4）
+app.register_blueprint(assistant_api.assistant_bp)   # /api/ai/*
+app.register_blueprint(location.location_bp)         # /api/map/config、/api/location/resolve、/api/cabinets/nearby
+app.register_blueprint(payment_api.payment_bp)       # /api/pay/*
+app.register_blueprint(packaging_tasks.packaging_bp)  # /api/pack-materials、/api/courier/*
 
 # 启动通知轮询线程（daemon，随进程退出）。测试脚本导入本模块时不想真的跑后台线程，
 # 可用 NOTIFY_WORKER=0 关掉，改为手动调用 notify.dispatch_pending() 控制时序。

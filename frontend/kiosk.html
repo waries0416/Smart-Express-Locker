@@ -272,6 +272,45 @@
     </div>
   </section>
 
+  <!-- ================= AI 智能问答（帮助屏入口） ================= -->
+  <section class="kiosk-screen" id="screen-ai-help">
+    <div class="kiosk-panel">
+      <h2>🤖 智能助手 · 有问题问我</h2>
+      <p class="muted" style="text-align:center;margin-top:-6px;">
+        寄件怎么包、哪些不能寄、超时怎么算，都可以直接问
+      </p>
+
+      <!-- 问答记录：大字、大间距，适合触屏远距离阅读 -->
+      <div class="kai-log" id="kaiLog">
+        <div class="kai-msg bot">
+          <div class="kai-bubble">
+            你好，我是快递柜助手。你可以问我：
+            <br/>· 玻璃杯要怎么包装？
+            <br/>· 哪些东西不能寄？
+            <br/>· 包裹超时了怎么办？
+          </div>
+        </div>
+      </div>
+
+      <div class="kai-input-row">
+        <input id="kaiInput" class="kai-input" maxlength="200"
+               placeholder="输入问题，例如：玻璃杯怎么寄" autocomplete="off" />
+        <button class="btn green kai-send" id="kaiSend" onclick="kaiAsk()">发送</button>
+      </div>
+      <p class="kai-hint" id="kaiHint"></p>
+
+      <div class="kai-quick">
+        <button class="btn ghost" onclick="kaiQuick('玻璃杯要怎么包装？')">玻璃杯怎么包？</button>
+        <button class="btn ghost" onclick="kaiQuick('哪些东西不能寄？')">什么不能寄？</button>
+        <button class="btn ghost" onclick="kaiQuick('超时了怎么办？')">超时怎么办？</button>
+      </div>
+
+      <div class="btn-row" style="justify-content:center;margin-top:14px;">
+        <button class="btn ghost" onclick="go('home')">返回首页</button>
+      </div>
+    </div>
+  </section>
+
   <!-- 帮助 -->
   <section class="kiosk-screen" id="screen-about">
     <div class="kiosk-panel">
@@ -300,6 +339,13 @@
         <li><b>开柜引导：</b>取件成功后格口号高亮显示，并有 30 秒倒计时，可点击「重新开门」防止误关。</li>
         <li><b>切换柜体：</b>左上角下拉可切换当前操作的快递柜，二维码与取件均以所选柜体为准。</li>
       </ul>
+      <div class="help-ai-entry">
+        <div>
+          <div class="hae-title">🤖 有问题？问智能助手</div>
+          <div class="hae-sub">包装怎么选、哪些不能寄、费用怎么算</div>
+        </div>
+        <button class="btn green hae-btn" onclick="go('ai-help')">去提问</button>
+      </div>
       <div class="btn-row" style="justify-content:center;margin-top:10px;">
         <button class="btn ghost" onclick="go('home')">返回首页</button>
       </div>
@@ -322,6 +368,11 @@
       <div class="pay-qr">📱</div>
       <h3>超时保管费</h3>
       <div class="pay-amount" id="payAmount">¥1.00</div>
+      <!-- 支付提供方与 mock 标识由 payStatusMeta / 后端 provider_label 驱动 -->
+      <div class="pay-provider-line">
+        <span class="pay-provider-tag" id="payProviderTag">模拟支付</span>
+        <span class="pay-provider-note" id="payProviderNote">演示环境，不会真实扣款</span>
+      </div>
       <p class="muted" id="payDesc">请使用微信 / 支付宝扫码支付</p>
       <div class="pay-progress" id="payProgress">等待支付…</div>
       <div class="btn-row" style="justify-content:center;">
@@ -345,7 +396,9 @@
     </div>
   </div>
 
+  <script src="js/api-core.js"></script>
   <script src="js/api.js"></script>
   <script src="js/kiosk.js"></script>
+  <script src="js/kiosk-innovations.js"></script>
 </body>
 </html>

@@ -103,3 +103,75 @@ td .btn { margin-right: 4px; }
 .badge.EXPIRE_URGE        { background: #fee2e2; color: #b91c1c; }
 .badge.EXCEPTION_ALERT    { background: #ede9fe; color: #6d28d9; }
 .badge.PICKUP_RECEIPT     { background: #dcfce7; color: #15803d; }
+
+/* ===========================================================================
+   创新能力视图（柜体坐标 / 备包装清单 / 支付流水）
+   =========================================================================== */
+
+/* 顶部提示条：三种语义色，明确区分"正常 / 需注意 / 错误" */
+.admin-warn {
+  border-radius: 10px; padding: 11px 14px; margin-bottom: 14px;
+  font-size: 13px; line-height: 1.6;
+  background: #f8fafc; border: 1px solid var(--line); color: var(--ink-2);
+}
+.admin-warn.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.admin-warn.err  { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+.admin-warn.ok   { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+
+/* 工具栏里的按钮组不要被 margin-left:auto 顶散 */
+.toolbar .btn.ghost { margin-left: 0; }
+
+/* 坐标输入：窄一点的数字框，避免表格被撑宽 */
+.coord-input {
+  width: 120px; padding: 7px 10px; font-size: 13px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.coord-input::placeholder { color: #cbd5e1; }
+
+/* 库存低量高亮 */
+.stock-low { color: #dc2626; font-weight: 800; }
+.stock-ok { color: #15803d; font-weight: 700; }
+.stock-input { padding: 6px 9px; font-size: 13px; }
+
+/* 金额等宽显示，便于核对 */
+.amt { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+
+/* 支付状态徽章 */
+.pay-badge {
+  display: inline-block; padding: 2px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; white-space: nowrap;
+}
+.pay-badge.pending { background: #fef3c7; color: #b45309; }
+.pay-badge.success { background: #dcfce7; color: #15803d; }
+.pay-badge.failed  { background: #fee2e2; color: #b91c1c; }
+.pay-badge.closed  { background: #e2e8f0; color: #475569; }
+
+/* 模拟支付标记：必须一眼可见，防止把演示流水当成真实收入 */
+.mock-tag {
+  display: inline-block; margin-left: 4px;
+  padding: 1px 7px; border-radius: 6px;
+  font-size: 11px; font-weight: 800;
+  background: #fef3c7; color: #92400e; border: 1px dashed #fbbf24;
+  white-space: nowrap;
+}
+
+/* 失败行轻微底色，方便快速定位 */
+tr.row-failed { background: #fef2f2; }
+tr.row-failed:hover { background: #fee2e2; }
+
+/* 支付流水分页按钮 */
+.pager button { min-width: 70px; }
+
+/* 窄屏（管理端也可能在小屏笔记本上打开）：表格横向滚动而不是撑破布局 */
+@media (max-width: 1280px) {
+  .admin-main { padding: 18px 16px; }
+  .admin-layout { grid-template-columns: 190px 1fr; }
+  .coord-input { width: 100px; }
+}
+@media (max-width: 1024px) {
+  .admin-layout { grid-template-columns: 1fr; }
+  .sidebar { flex-direction: row; overflow-x: auto; padding: 10px; }
+  .sidebar .brand, .sidebar .foot { display: none; }
+  .sidebar a { white-space: nowrap; }
+}

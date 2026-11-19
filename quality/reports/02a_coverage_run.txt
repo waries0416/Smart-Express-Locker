@@ -1,0 +1,38 @@
+##############################################################################
+# 【历史基线 · 已停用】T3-prep 阶段输出，不要用它做答辩口径
+#-----------------------------------------------------------------------------
+# 本文件属于 T3-prep 阶段（32 用例时代），已被 R3b 的权威产物取代。
+# 当前口径请看：
+#   用例数   -> 05_test_count_reconciliation.txt（195）
+#   覆盖率   -> 03_coverage_report.txt（56.32%）
+#   pylint   -> 06_pylint_baseline.txt（9.59）、07_pylint_new_modules.txt（9.77）
+#   汇总     -> 99_summary.txt
+# 保留原因：可追溯；引用数字时一律用上面四份，不要引本文件。
+##############################################################################
+
+.................D:\softwaretest\backend\tests\test_route_separation.py:49: ResourceWarning: unclosed file <_io.BufferedReader name='D:\\softwaretest\\frontend/login.html'>
+  self.assertEqual(self.client.get(path).status_code, 200, path)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.......D:\softwaretest\backend\tests\test_route_separation.py:43: ResourceWarning: unclosed file <_io.BufferedReader name='D:\\softwaretest\\frontend/login.html'>
+  self.assertEqual(self.client.get("/admin/login").headers.get("Cache-Control"),
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\31189\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\unittest\case.py:589: ResourceWarning: unclosed file <_io.BufferedReader name='D:\\softwaretest\\frontend/kiosk.html'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.D:\softwaretest\backend\tests\test_route_separation.py:37: ResourceWarning: unclosed file <_io.BufferedReader name='D:\\softwaretest\\frontend/kiosk.html'>
+  self.assertEqual(self.client.get("/kiosk").status_code, 200)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..D:\softwaretest\backend\tests\test_route_separation.py:74: ResourceWarning: unclosed file <_io.BufferedReader name='D:\\softwaretest\\frontend/admin.html'>
+  self.assertEqual(self.client.get("/admin/dashboard").status_code, 200)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...D:\softwaretest\backend\tests\test_route_separation.py:128: ResourceWarning: unclosed file <_io.BufferedReader name='D:\\softwaretest\\frontend\\css/style.css'>
+  self.assertEqual(self.client.get("/css/style.css").status_code, 200)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+D:\softwaretest\backend\tests\test_route_separation.py:129: ResourceWarning: unclosed file <_io.BufferedReader name='D:\\softwaretest\\frontend\\js/api.js'>
+  self.assertEqual(self.client.get("/js/api.js").status_code, 200)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..
+----------------------------------------------------------------------
+Ran 32 tests in 0.382s
+
+OK

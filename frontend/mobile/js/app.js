@@ -37,21 +37,9 @@ function clearAuth() {
 }
 
 async function api(path, { method = "GET", body, headers = {} } = {}) {
-  const h = { ...headers };
-  if (token()) h.Authorization = "Bearer " + token();
-  if (body !== undefined) h["Content-Type"] = "application/json";
-  const res = await fetch(API_BASE + path, {
-    method, headers: h, body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  let data = null;
-  try { data = await res.json(); } catch (e) { /* 非 JSON 响应 */ }
-  if (!res.ok) {
-    const err = new Error((data && (data.error || data.message)) || `请求失败 (${res.status})`);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
-  return data;
+  // 统一走 ApiCore：自动带 Bearer、20s 超时、401/403 中文提示、错误标记归一化。
+  // token 由 /m/js/api-mobile.js 注入的读取器从 localStorage["m_token"] 取。
+  return ApiCore.request(method, path, body, headers);
 }
 
 function esc(s) {
@@ -79,9 +67,11 @@ function toast(msg, type = "") {
 }
 
 /* ---------------- 屏幕切换 ---------------- */
-const TAB_SCREENS = ["pickup", "send", "me"];
+const TAB_SCREENS = ["pickup", "send", "ai", "map", "me"];
 const HDR_TITLE = {
   pickup: "手机取件", send: "寄件下单", me: "我的",
+  ai: "智能助手", map: "附近的柜",
+  pay: "支付",
   ticket: "扫码确认", courier: "快递员",
 };
 function show(name) {
@@ -617,6 +607,8 @@ function bindEvents() {
       show(name);
       if (name === "pickup") { try { await loadPackages(); } catch (e) { /* ignore */ } }
       if (name === "me") { renderMe(); loadMessages(); }
+      // 助手 / 找柜两个页面的数据加载（定义在 innovations.js）
+      if (typeof onInnovationTabEnter === "function") onInnovationTabEnter(name);
     });
   });
 }

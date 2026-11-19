@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify
 
 import db
 import notify
+import packaging_tasks
 from auth import require_kiosk_role
 
 business_bp = Blueprint("business", __name__, url_prefix="/api/business")
@@ -60,6 +61,29 @@ def _detail(pid):
     return db.query_one("SELECT * FROM v_package_detail WHERE package_id=%s", (pid,))
 
 
+def _parse_recommendation_id(value):
+    """解析可选的 pack_recommendation_id。
+
+    容错原则：这个字段是老接口上的**新增可选字段**，任何非法值都当作"没传"，
+    绝不因为一个可选字段而让存件主流程 400/500（向后兼容是硬要求）。
+    """
+    if value in (None, "", []):
+        return None
+    try:
+        rid = int(value)
+    except (TypeError, ValueError):
+        return None
+    if rid <= 0:
+        return None
+    try:
+        if not db.query_one(
+                "SELECT 1 FROM t_pack_recommendation WHERE recommendation_id=%s", (rid,)):
+            return None
+    except Exception:
+        return None
+    return rid
+
+
 @business_bp.route("/store", methods=["POST"])
 def store():
     """快递员存件：分配格口、生成取件码、写入包裹与占用格口。
@@ -76,6 +100,8 @@ def store():
     weight = body.get("weight", 0)
     cabinet_id = body.get("cabinet_id")
     note = body.get("note")
+    # 创新点 2：可选的包装推荐引用。缺失/非法时行为**与改造前完全一致**（向后兼容）。
+    pack_rec_id = _parse_recommendation_id(body.get("pack_recommendation_id"))
 
     if not courier_id:
         return jsonify({"error": "缺少快递员ID"}), 400
@@ -155,11 +181,12 @@ def store():
             cur.execute(
                 """INSERT INTO t_package(tracking_no, courier_id, user_id, cabinet_id, cell_id,
                                          size_type, weight, status, pickup_code, store_time,
-                                         expire_time, note, from_send_id, overtime_fee, overtime_fee_paid)
+                                         expire_time, note, from_send_id, overtime_fee,
+                                         overtime_fee_paid, pack_recommendation_id)
                    VALUES(%s,%s,%s,%s,%s,%s,%s,'STORED',%s, NOW(),
-                         DATE_ADD(NOW(),INTERVAL 48 HOUR),%s,%s,NULL, 0)""",
+                         DATE_ADD(NOW(),INTERVAL 48 HOUR),%s,%s,NULL, 0,%s)""",
                 (tracking_no, courier_id, user["user_id"], cell["cabinet_id"], cell["cell_id"],
-                 size_type, weight, pickup_code, note, from_send_id),
+                 size_type, weight, pickup_code, note, from_send_id, pack_rec_id),
             )
             pid = cur.lastrowid
             # 占用格口，同一连接下前面的 FOR UPDATE 锁仍然有效
@@ -170,6 +197,11 @@ def store():
     detail = _detail(pid)
     # 通知旁路：存件事务已提交，这里才通知收件人；通知失败不影响存件结果
     notify.safe_enqueue("STORE_ARRIVAL", pid)
+    # 创新点 2：带推荐单时自动生成快递员"备包装"任务（尽力而为，失败不影响存件）
+    pack_task_id = None
+    if pack_rec_id:
+        pack_task_id = packaging_tasks.create_task_from_recommendation(
+            pid, pack_rec_id, courier_id=courier_id)
     return jsonify({
         "message": "存件成功，已分配格口",
         "pickup_code": pickup_code,
@@ -177,6 +209,8 @@ def store():
         "cabinet_code": detail["cabinet_code"],
         "cell_code": detail["cell_code"],
         "package": detail,
+        # 仅在带推荐时出现；不带推荐时该键不出现，保证老前端零影响
+        **({"pack_task_id": pack_task_id} if pack_rec_id else {}),
     }), 201
 
 
@@ -305,6 +339,8 @@ def send_order():
     cabinet_id = body.get("cabinet_id")
     weight = body.get("weight") or 0
     note = body.get("note")
+    # 创新点 2：可选推荐引用。非法值按"没传"处理，老调用方零影响。
+    pack_rec_id = _parse_recommendation_id(body.get("pack_recommendation_id"))
 
     if not re.match(r"^1[3-9]\d{9}$", user_phone):
         return jsonify({"error": "寄件人手机号格式不正确（须为 11 位有效手机号）"}), 400
@@ -353,12 +389,13 @@ def send_order():
                 """INSERT INTO t_package(direction, tracking_no, courier_id, user_id, company_id,
                                          cabinet_id, cell_id, size_type, weight, status, pickup_code,
                                          store_time, expire_time, recipient_name, recipient_phone,
-                                         note, overtime_fee, overtime_fee_paid)
+                                         note, overtime_fee, overtime_fee_paid,
+                                         pack_recommendation_id)
                    VALUES('SEND',%s,NULL,%s,%s,%s,%s,%s,%s,'SEND_WAIT_PICKUP',%s,NOW(),
-                         DATE_ADD(NOW(),INTERVAL 48 HOUR),%s,%s,%s,NULL,0)""",
+                         DATE_ADD(NOW(),INTERVAL 48 HOUR),%s,%s,%s,NULL,0,%s)""",
                 (tracking_no, user["user_id"], company_id, cell["cabinet_id"], cell["cell_id"],
                  size_type, weight, pickup_code, recipient_name,
-                 recipient_phone, note))
+                 recipient_phone, note, pack_rec_id))
             pid = cur.lastrowid
             cur.execute("UPDATE t_cell SET status='OCCUPIED' WHERE cell_id=%s", (cell["cell_id"],))
     except Exception as e:
@@ -366,6 +403,13 @@ def send_order():
 
     detail = _detail(pid)
     notify.safe_enqueue("SEND_ORDER_CREATED", pid)
+    # 创新点 2：带推荐单时生成备包装任务（尽力而为，失败不影响下单）
+    pack_task_id = None
+    if pack_rec_id:
+        pack_task_id = packaging_tasks.create_task_from_recommendation(
+            pid, pack_rec_id,
+            courier_id=None,   # 寄件单尚未揽收，任务暂不指派具体快递员（null = 待认领）
+            note="用户寄件时引用 AI 包装推荐，揽收后按清单备料")
     return jsonify({
         "message": "寄件下单成功，请放入物品并关闭柜门",
         "order_code": pickup_code,
@@ -377,6 +421,7 @@ def send_order():
         "recipient_phone": detail.get("recipient_phone"),
         "expire_time": detail["expire_time"],
         "package": detail,
+        **({"pack_task_id": pack_task_id} if pack_rec_id else {}),
     }), 201
 
 
@@ -628,6 +673,27 @@ def send_track():
     return jsonify({"count": len(result), "orders": result})
 
 
+def _pickup_race_lost(pid, method, role):
+    """原子条件更新未命中（rowcount=0）时的统一收尾（R9b 缺陷 E）。
+
+    走到这里说明「读状态 → 判断」与「写状态」之间，另一个并发请求已经把包裹
+    改成了不可取状态。此时**绝不能再写 SUCCESS 流水**，按最新状态回一个与前置
+    校验一致的 409 文案，并留一条 FAIL 流水（失败尝试同样要可追溯）。
+    """
+    row = db.query_one("SELECT status FROM t_package WHERE package_id=%s", (pid,))
+    st = row["status"] if row else None
+    if st == "RETURNED":
+        reason = "该包裹已退回快递员"
+    elif st == "EXCEPTION":
+        reason = "包裹存在异常，请联系管理员处理"
+    else:
+        reason = "该包裹已取走"
+    db.insert(
+        "INSERT INTO t_pickup_record(package_id,pickup_method,pickup_time,operator_role,"
+        "result,fail_reason) VALUES(%s,%s,NOW(),%s,'FAIL',%s)", (pid, method, role, reason))
+    return reason, 409
+
+
 @business_bp.route("/pickup", methods=["POST"])
 def pickup():
     """用户验证码取件：校验取件码、置为已取、记录取件流水（触发器自动释放格口）。
@@ -668,9 +734,16 @@ def pickup():
                         "overtime_fee": round(fee, 2),
                         "message": f"包裹已超时，请先支付超时保管费 ¥{fee:.2f}"}), 402
 
-    # 成功取件
-    db.execute("UPDATE t_package SET status='PICKED', pickup_time=NOW() WHERE package_id=%s",
-               (pkg["package_id"],))
+    # 成功取件：把「状态校验」与「状态变更」合成**一次**原子条件更新（R9b 缺陷 E）。
+    # 修复前这里是不带 WHERE status 的无条件 UPDATE + 无条件写 SUCCESS 流水，并发
+    # 同一取件码时 N 个请求各写一条 SUCCESS（实测并发 10 次有 7 次返回 200）。
+    # 现在只有让 rowcount=1 的那一个请求算取件成功，其余一律 409。
+    updated = db.execute(
+        "UPDATE t_package SET status='PICKED', pickup_time=NOW() "
+        "WHERE package_id=%s AND status IN ('STORED','EXPIRED')", (pkg["package_id"],))
+    if updated != 1:
+        reason, code = _pickup_race_lost(pkg["package_id"], "CODE", "USER")
+        return jsonify({"error": reason}), code
     db.insert("INSERT INTO t_pickup_record(package_id,pickup_method,pickup_time,operator_role,result)"
               " VALUES(%s,'CODE',NOW(),'USER','SUCCESS')", (pkg["package_id"],))
     detail = _detail(pkg["package_id"])
@@ -835,24 +908,43 @@ def my_pickup():
 
 
 def _charge_overtime(ids):
-    """对超时且未支付的包裹计收保管费，返回 (已计费列表, 合计金额)。"""
+    """对超时且未支付的包裹计收保管费，返回 (已计费列表, 合计金额)。
+
+    并发安全（R9b 缺陷 D）：把「是否应计费」的判定与「置为已缴」的写入合并成
+    **一条带条件的 UPDATE**，以 rowcount 为唯一判据：
+
+        UPDATE t_package SET overtime_fee_paid=1, overtime_fee=%s
+         WHERE package_id=%s AND status='EXPIRED' AND overtime_fee_paid=0
+
+    同一件包裹被 N 个并发请求同时计费时，只有一个能拿到 rowcount=1，其余全部 0；
+    rowcount != 1 一律跳过（不写流水、不累加金额），重复调用因此表现为幂等空转
+    （paid_count=0）。修复前这里是"无锁 SELECT → 判断 → 无条件 UPDATE + INSERT"，
+    实测 5 件包裹并发支付写出 79 条 TIMEOUT-RESOLVED 流水、单件最多 20 条。
+    """
     if not ids:
         return [], 0.0
     ph = ",".join(["%s"] * len(ids))
     rows = db.query(
         f"SELECT package_id, status, overtime_fee, overtime_fee_paid FROM t_package "
         f"WHERE package_id IN ({ph})", ids)
-    payable = [r for r in rows if r["status"] == "EXPIRED" and not r["overtime_fee_paid"]]
+    payable = []
     total = 0.0
-    for r in payable:
+    for r in rows:
+        # 无锁预筛只是省一次无谓的 UPDATE；真正的并发闸门是下面带条件的 UPDATE
+        if r["status"] != "EXPIRED" or r["overtime_fee_paid"]:
+            continue
         fee = float(r["overtime_fee"]) if r["overtime_fee"] is not None else 1.00
-        db.execute(
-            "UPDATE t_package SET overtime_fee_paid=1, overtime_fee=%s WHERE package_id=%s",
+        updated = db.execute(
+            "UPDATE t_package SET overtime_fee_paid=1, overtime_fee=%s "
+            "WHERE package_id=%s AND status='EXPIRED' AND overtime_fee_paid=0",
             (fee, r["package_id"]))
+        if updated != 1:
+            continue        # 并发竞争失败：已被别的请求入账，本次幂等空转、不写流水
         db.insert(
             "INSERT INTO t_exception_log(package_id,exception_type,occur_time,handle_time,"
             "handler,handle_result,remark) VALUES(%s,'TIMEOUT',NOW(),NOW(),'用户','RESOLVED',%s)",
             (r["package_id"], f"扫码支付超时保管费 ¥{fee:.2f}"))
+        payable.append(r)
         total += fee
     return payable, round(total, 2)
 
@@ -892,7 +984,14 @@ def _do_unlock(pid, method="CODE", role="USER", cabinet_id=None):
         return False, {"error": "包裹存在异常，请联系管理员处理"}, 409
     if st == "EXPIRED" and not pkg["overtime_fee_paid"]:
         return False, {"error": "NEED_PAYMENT", "package_id": pid}, 402
-    db.execute("UPDATE t_package SET status='PICKED', pickup_time=NOW() WHERE package_id=%s", (pid,))
+    # 无码/开柜路径：与 pickup() 同一套原子条件更新（R9b 缺陷 E 的第二条路径）。
+    # 未命中 rowcount=1 说明并发者已先取件/改状态 → 409，不写 SUCCESS 流水。
+    updated = db.execute(
+        "UPDATE t_package SET status='PICKED', pickup_time=NOW() "
+        "WHERE package_id=%s AND status IN ('STORED','EXPIRED')", (pid,))
+    if updated != 1:
+        reason, code = _pickup_race_lost(pid, method, role)
+        return False, {"error": reason}, code
     db.insert("INSERT INTO t_pickup_record(package_id,pickup_method,pickup_time,operator_role,result)"
               " VALUES(%s,%s,NOW(),%s,'SUCCESS')", (pid, method, role))
     notify.safe_enqueue("PICKUP_RECEIPT", pid)
@@ -993,7 +1092,16 @@ def cabinet_availability(cabinet_id):
 
 @business_bp.route("/cells/<int:cell_id>/force-unlock", methods=["POST"])
 def force_unlock_cell(cell_id):
-    """管理员远程强制开锁：占用则标记已取并释放格口；故障/空闲格口则解除故障。"""
+    """管理员远程强制开锁：占用则标记已取并释放格口；故障/空闲格口则解除故障。
+
+    响应语义（两条分支 **故意不同**，改动前务必同步 frontend/js/admin.js）：
+      · 格口有活动包裹（STORED/EXPIRED/EXCEPTION）→ detail = 包裹详情(v_package_detail)，
+        前端提示"包裹已取出，格口释放"；CAS 未命中（并发已被别人取走）时返回 409。
+      · 格口空闲/故障（无活动包裹）→ detail = {"cell_id": int, "cleared": true}，
+        前端靠 detail.cleared 判定，提示"故障/空闲格口已重置"。
+        这条分支对应管理端格口抽屉里空格口/故障格口的「解除故障 / 置为空闲」按钮
+        （admin.js 的 drawerForceUnlock），是**正常业务路径**，不是防御性死代码。
+    """
     cell = db.query_one("SELECT * FROM t_cell WHERE cell_id=%s", (cell_id,))
     if not cell:
         return jsonify({"error": "格口不存在"}), 404
@@ -1001,12 +1109,25 @@ def force_unlock_cell(cell_id):
         "SELECT * FROM t_package WHERE cell_id=%s AND status IN ('STORED','EXPIRED','EXCEPTION') "
         "ORDER BY package_id DESC LIMIT 1", (cell_id,))
     if pkg:
-        db.execute("UPDATE t_package SET status='PICKED', pickup_time=NOW() WHERE package_id=%s",
-                   (pkg["package_id"],))
+        # 管理员远程强制开柜同样是「读 → 判断 → 写」：并发点两次「强制开柜」会各自
+        # 写一条 SUCCESS 流水，同一件包裹被"取走"两次（R9b 缺陷 E 的第三条路径）。
+        # 这里改成 CAS + rowcount 兜底，但状态集合**必须**沿用本路径自己的
+        # ('STORED','EXPIRED','EXCEPTION')：管理员远程开锁的语义包含处置异常件，
+        # 若照搬取件路径的 ('STORED','EXPIRED')，EXCEPTION 件将永远开不了柜（功能回归）。
+        # 也就是只把"无条件 UPDATE"换成"带本路径状态集合的条件 UPDATE"，语义不变。
+        updated = db.execute(
+            "UPDATE t_package SET status='PICKED', pickup_time=NOW() "
+            "WHERE package_id=%s AND status IN ('STORED','EXPIRED','EXCEPTION')",
+            (pkg["package_id"],))
+        if updated != 1:
+            return jsonify({"error": "该格口包裹已被取出或状态已变化，请刷新格口矩阵后重试"}), 409
         db.insert("INSERT INTO t_pickup_record(package_id,pickup_method,pickup_time,operator_role,result)"
                   " VALUES(%s,'ADMIN',NOW(),'ADMIN','SUCCESS')", (pkg["package_id"],))
         detail = _detail(pkg["package_id"])
     else:
+        # 空/故障格口：把格口复位为 FREE。这条分支的响应结构与"有包裹"分支不同是
+        # **有意为之**：这里没有包裹详情可返回，detail.cleared 供前端区分成功文案
+        # （见 frontend/js/admin.js 的 drawerForceUnlock）。不要为了"结构统一"改掉它。
         db.execute("UPDATE t_cell SET status='FREE' WHERE cell_id=%s", (cell_id,))
         detail = {"cell_id": cell_id, "cleared": True}
     return jsonify({"message": "远程开锁成功", "detail": detail})

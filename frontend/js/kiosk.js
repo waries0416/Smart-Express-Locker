@@ -278,6 +278,11 @@ function go(screen) {
   if (screen === "store") loadAvailability();
   if (screen === "collect") loadCollect();
   if (screen === "records") loadRecords();
+  // AI 问答屏：自动聚焦输入框，省掉一次点击
+  if (screen === "ai-help") setTimeout(() => {
+    const el = document.getElementById("kaiInput");
+    if (el) el.focus();
+  }, 60);
 }
 
 // 各规格格口重量上限(kg) —— 与后端 business.py 的 SIZE_WEIGHT_LIMIT 保持一致
@@ -720,24 +725,31 @@ function startPay(ids, amountText, onPaid) {
   document.getElementById("payProgress").textContent = "等待支付…";
   document.getElementById("payProgress").className = "pay-progress";
   document.getElementById("payConfirm").disabled = false;
+  // 支付提供方标识：kiosk.js 走的是模拟支付通道，必须明确告知不会真实扣款
+  if (typeof kaiRenderPayProvider === "function") {
+    kaiRenderPayProvider({ provider: "mock", provider_label: "模拟支付", mock: true });
+  }
   document.getElementById("payModal").classList.add("show");
 }
 async function confirmPay() {
   const btn = document.getElementById("payConfirm");
   btn.disabled = true;
-  document.getElementById("payProgress").textContent = "支付中…";
+  const progress = document.getElementById("payProgress");
+  progress.textContent = "支付中…";
+  progress.className = "pay-progress";
   try {
     await API.payOvertime(payTargets);
-    document.getElementById("payProgress").textContent = "✅ 支付成功";
-    document.getElementById("payProgress").className = "pay-progress ok";
+    progress.textContent = "✅ 支付成功";
+    progress.className = "pay-progress ok";
     setTimeout(() => {
       closePay();
       const cb = payOnPaid; payOnPaid = null; payTargets = [];
       if (cb) cb();
     }, 700);
   } catch (e) {
-    document.getElementById("payProgress").textContent = "支付失败：" + e.message;
-    document.getElementById("payProgress").className = "pay-progress err";
+    // 统一中文错误文案（401/超时/断网分别提示），不再直接抛英文 message
+    progress.textContent = "支付失败：" + ApiCore.errText(e);
+    progress.className = "pay-progress err";
     btn.disabled = false;
   }
 }

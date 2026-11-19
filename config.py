@@ -108,3 +108,43 @@ NOTIFY_CONFIG = {
     "fail_rate":           float(os.getenv("NOTIFY_FAIL_RATE", "0")),
     "log_path":            os.getenv("NOTIFY_LOG", os.path.join(_BASE_DIR, "logs", "notify.log")),
 }
+
+
+# ---- 创新功能 · 外部服务配置（docs/api-innovations.md §6）----
+# 设计原则：
+#   · 所有密钥**只**从环境变量读取，任何 Key 都不写进代码、日志、响应；
+#   · 任一项缺省时功能自动降级（AI→本地规则、地图→按柜号排、支付→模拟支付），
+#     绝不因为缺配置而抛异常；
+#   · legacy_* 两个键仅为可读性说明保留，实际读取点在各客户端模块内，
+#     便于测试用 monkeypatch 改环境变量后重新取值。
+AI_CONFIG = {
+    # 空值 = 未配置 → AI 相关接口全部走本地规则，仍返回 200
+    "api_key":       os.getenv("DEEPSEEK_API_KEY", ""),
+    "base_url":      os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+    "model":         os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+    "timeout":       float(os.getenv("DEEPSEEK_TIMEOUT", "8")),
+    "max_retry":     int(os.getenv("DEEPSEEK_MAX_RETRY", "2")),
+    "enabled":       os.getenv("AI_ENABLED", "1") == "1",
+}
+
+AMAP_CONFIG = {
+    # 可下发前端（需在高德控制台绑定域名白名单）
+    "js_key":            os.getenv("AMAP_JS_KEY", ""),
+    "js_security_code":  os.getenv("AMAP_JS_SECURITY_CODE", ""),
+    # **禁止下发**：只在服务端用于地理编码/逆地理编码
+    "web_key":           os.getenv("AMAP_WEB_KEY", ""),
+    "timeout":           float(os.getenv("AMAP_TIMEOUT", "5")),
+}
+
+PAYMENT_CONFIG = {
+    # mock（默认）| alipay —— alipay 需沙箱凭据齐全，否则自动回落 mock
+    "provider":       os.getenv("PAYMENT_PROVIDER", "mock"),
+    "expire_minutes": int(os.getenv("PAYMENT_EXPIRE_MINUTES", "10")),
+    "send_fee_yuan":  float(os.getenv("SEND_FEE_YUAN", "1.00")),
+    "alipay_app_id":      os.getenv("ALIPAY_APP_ID", ""),
+    "alipay_private_key": os.getenv("ALIPAY_PRIVATE_KEY", ""),
+    "alipay_public_key":  os.getenv("ALIPAY_PUBLIC_KEY", ""),
+    "alipay_sandbox":     os.getenv("ALIPAY_SANDBOX", "1") == "1",
+    "alipay_gateway":     os.getenv("ALIPAY_GATEWAY", ""),
+    "alipay_notify_url":  os.getenv("ALIPAY_NOTIFY_URL", ""),
+}

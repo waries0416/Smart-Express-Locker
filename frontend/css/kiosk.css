@@ -241,6 +241,105 @@
 .help-cols h3 { color: #fff; margin: 0 0 8px; font-size: 17px; }
 .help-cols ul { margin: 0; padding-left: 18px; line-height: 1.9; color: #cbd5e1; font-size: 13.5px; }
 
+/* ===========================================================================
+   帮助屏 · AI 问答入口条
+   =========================================================================== */
+.help-ai-entry {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: linear-gradient(135deg, rgba(99,102,241,.28), rgba(139,92,246,.22));
+  border: 1px solid rgba(139,92,246,.45);
+  border-radius: 16px; padding: 16px 20px; margin-top: 16px;
+}
+.hae-title { color: #fff; font-size: 16.5px; font-weight: 800; }
+.hae-sub { color: #cbd5e1; font-size: 13px; margin-top: 3px; }
+.hae-btn { flex: none; min-height: 48px; padding: 12px 26px; font-size: 16px; }
+
+/* ===========================================================================
+   AI 问答屏（触屏端）
+   ---------------------------------------------------------------------------
+   触屏端是站立操作、远距离阅读，所以：
+   · 按钮/输入框高度均 ≥ 48px（普通移动端要求 44px，触屏更保守）
+   · 消息字号 16px 起，行高放宽
+   · 问答区固定高度并内部滚动，避免整屏跳动
+   =========================================================================== */
+.kai-log {
+  max-height: 420px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px; margin-bottom: 16px;
+  background: rgba(0, 0, 0, .22);
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 16px;
+}
+.kai-msg { display: flex; align-items: flex-end; gap: 8px; }
+.kai-msg.user { flex-direction: row-reverse; }
+.kai-bubble {
+  max-width: 76%; padding: 13px 17px; border-radius: 16px;
+  font-size: 16px; line-height: 1.7;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.kai-msg.bot .kai-bubble {
+  background: rgba(255, 255, 255, .1); color: #e2e8f0;
+  border-bottom-left-radius: 5px;
+}
+.kai-msg.user .kai-bubble {
+  background: #2563eb; color: #fff;
+  border-bottom-right-radius: 5px;
+}
+.kai-src {
+  flex: none; font-size: 12px; font-weight: 700;
+  padding: 2px 9px; border-radius: 8px; white-space: nowrap;
+}
+.kai-src.src-ai { background: rgba(139, 92, 246, .28); color: #ddd6fe; }
+.kai-src.src-rule { background: rgba(14, 165, 233, .26); color: #bae6fd; }
+.kai-src.src-unknown { background: rgba(148, 163, 184, .22); color: #cbd5e1; }
+
+/* 输入行：输入框 + 发送按钮，按钮不换行、高度足够 */
+.kai-input-row { display: flex; gap: 12px; align-items: stretch; }
+.kai-input {
+  flex: 1; min-width: 0; min-height: 52px;
+  padding: 14px 16px; font-size: 16px;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 14px; color: #fff;
+}
+.kai-input::placeholder { color: #94a3b8; }
+.kai-input:focus {
+  outline: none; border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .2);
+}
+.kai-send {
+  flex: none; min-height: 52px; padding: 14px 30px;
+  font-size: 16.5px; font-weight: 800; border-radius: 14px;
+}
+.kai-hint { font-size: 12.5px; color: #94a3b8; margin: 8px 0 0; min-height: 17px; }
+.kai-quick { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.kai-quick .btn {
+  min-height: 46px; padding: 11px 18px; font-size: 14.5px;
+  background: rgba(255, 255, 255, .06); color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, .16);
+}
+.kai-quick .btn:hover { background: rgba(37, 99, 235, .3); border-color: #3b82f6; color: #fff; }
+
+/* 支付提供方标识（弹层内） */
+.pay-provider-line {
+  display: flex; align-items: center; justify-content: center;
+  gap: 9px; flex-wrap: wrap; margin: 4px 0 2px;
+}
+.pay-provider-tag {
+  font-size: 13px; font-weight: 800;
+  padding: 3px 11px; border-radius: 999px;
+}
+.pay-provider-tag.mock { background: #fef3c7; color: #92400e; border: 1px dashed #fbbf24; }
+.pay-provider-tag.real { background: #dcfce7; color: #15803d; }
+.pay-provider-note { font-size: 12.5px; color: #64748b; }
+
+/* 窄屏（<900px，如 1280×900 以下的小屏一体机）下的兜底 */
+@media (max-width: 900px) {
+  .kai-bubble { max-width: 88%; }
+  .help-ai-entry { flex-direction: column; align-items: stretch; text-align: center; }
+  .hae-btn { width: 100%; }
+}
+
 /* 批量取件列表 */
 .list-card { width: min(460px, 92vw); text-align: left; }
 .list-card h3 { text-align: center; }

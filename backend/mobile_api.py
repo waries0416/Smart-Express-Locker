@@ -21,6 +21,7 @@ import segno
 from flask import Blueprint, Response, jsonify, request
 
 import db
+import location
 from auth import issue_kiosk_token, require_kiosk_role
 from business import charge_overtime, do_unlock
 
@@ -392,28 +393,20 @@ def pay_overtime():
 
 # ============================================================================
 # 7. 附近柜机：按位置/编号搜索，带各规格空闲格口数
+# ----------------------------------------------------------------------------
+# 创新点 3 把这份查询迁到 backend/location.py（新增 /api/cabinets/nearby，
+# 带距离/得分/推荐标记）。本路由保留为**别名**，共用同一实现，
+# 避免手机端旧链接与新接口出现两套字段或两套排序。
 # ============================================================================
 @mobile_bp.route("/cabinets/nearby", methods=["GET"])
 def cabinets_nearby():
     q = (request.args.get("q") or "").strip()
-    like = f"%{q}%" if q else None
-    rows = db.query("""
-        SELECT cab.cabinet_id, cab.cabinet_code, cab.location, cab.cabinet_type, cab.status,
-               COUNT(cell.cell_id) AS total,
-               COALESCE(SUM(cell.status='FREE'), 0) AS free_cnt,
-               COALESCE(SUM(cell.status='FREE' AND cell.size_type='SMALL'), 0)  AS free_small,
-               COALESCE(SUM(cell.status='FREE' AND cell.size_type='MEDIUM'), 0) AS free_medium,
-               COALESCE(SUM(cell.status='FREE' AND cell.size_type='LARGE'), 0)  AS free_large
-        FROM t_cabinet cab
-        LEFT JOIN t_cell cell ON cell.cabinet_id = cab.cabinet_id
-        WHERE (%s IS NULL OR cab.location LIKE %s OR cab.cabinet_code LIKE %s)
-        GROUP BY cab.cabinet_id, cab.cabinet_code, cab.location, cab.cabinet_type, cab.status
-        ORDER BY cab.cabinet_id
-    """, (like, like, like))
-    return jsonify({"count": len(rows), "cabinets": [
-        {**r, "total": int(r["total"]), "free_cnt": int(r["free_cnt"]),
-         "free_small": int(r["free_small"]), "free_medium": int(r["free_medium"]),
-         "free_large": int(r["free_large"])} for r in rows]})
+    lat, lng, err = location.read_coord_params(request.args)
+    if err:
+        # 复用 location 的错误体（{error, code}），但手机端历史格式只要 {error}
+        body, status = err
+        return body, status
+    return jsonify(location.nearby_cabinets(q or None, lat, lng))
 
 
 # ============================================================================

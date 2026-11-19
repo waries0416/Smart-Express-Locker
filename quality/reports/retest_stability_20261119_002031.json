@@ -1,0 +1,272 @@
+{
+  "生成时间": "2026-11-19T00:20:22+08:00",
+  "并发度": 10,
+  "轮数": 5,
+  "轮次": [
+    {
+      "轮": 1,
+      "D": {
+        "ok": true,
+        "每件流水数": [
+          1,
+          1,
+          1
+        ],
+        "Σpaid_count": 3,
+        "包裹数": 3,
+        "清理": [
+          {
+            "package_id": 3091,
+            "pickup_code": "148746",
+            "cell_id": null
+          },
+          {
+            "package_id": 3092,
+            "pickup_code": "748118",
+            "cell_id": null
+          },
+          {
+            "package_id": 3093,
+            "pickup_code": "792824",
+            "cell_id": null
+          }
+        ]
+      },
+      "E1": {
+        "ok": true,
+        "200": 1,
+        "409": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3094,
+          "pickup_code": "965754",
+          "cell_id": 74
+        }
+      },
+      "E2": {
+        "ok": true,
+        "200": 1,
+        "非200": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3095,
+          "pickup_code": "960210",
+          "cell_id": 74
+        }
+      },
+      "未通过": []
+    },
+    {
+      "轮": 2,
+      "D": {
+        "ok": true,
+        "每件流水数": [
+          1,
+          1,
+          1
+        ],
+        "Σpaid_count": 3,
+        "包裹数": 3,
+        "清理": [
+          {
+            "package_id": 3096,
+            "pickup_code": "053737",
+            "cell_id": null
+          },
+          {
+            "package_id": 3097,
+            "pickup_code": "962008",
+            "cell_id": null
+          },
+          {
+            "package_id": 3098,
+            "pickup_code": "710534",
+            "cell_id": null
+          }
+        ]
+      },
+      "E1": {
+        "ok": true,
+        "200": 1,
+        "409": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3099,
+          "pickup_code": "976765",
+          "cell_id": 78
+        }
+      },
+      "E2": {
+        "ok": true,
+        "200": 1,
+        "非200": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3100,
+          "pickup_code": "063814",
+          "cell_id": 78
+        }
+      },
+      "未通过": []
+    },
+    {
+      "轮": 3,
+      "D": {
+        "ok": true,
+        "每件流水数": [
+          1,
+          1,
+          1
+        ],
+        "Σpaid_count": 3,
+        "包裹数": 3,
+        "清理": [
+          {
+            "package_id": 3101,
+            "pickup_code": "959641",
+            "cell_id": null
+          },
+          {
+            "package_id": 3102,
+            "pickup_code": "532931",
+            "cell_id": null
+          },
+          {
+            "package_id": 3103,
+            "pickup_code": "432285",
+            "cell_id": null
+          }
+        ]
+      },
+      "E1": {
+        "ok": true,
+        "200": 1,
+        "409": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3104,
+          "pickup_code": "184328",
+          "cell_id": 81
+        }
+      },
+      "E2": {
+        "ok": true,
+        "200": 1,
+        "非200": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3105,
+          "pickup_code": "587952",
+          "cell_id": 81
+        }
+      },
+      "未通过": []
+    },
+    {
+      "轮": 4,
+      "D": {
+        "ok": true,
+        "每件流水数": [
+          1,
+          1,
+          1
+        ],
+        "Σpaid_count": 3,
+        "包裹数": 3,
+        "清理": [
+          {
+            "package_id": 3106,
+            "pickup_code": "624173",
+            "cell_id": null
+          },
+          {
+            "package_id": 3107,
+            "pickup_code": "515319",
+            "cell_id": null
+          },
+          {
+            "package_id": 3108,
+            "pickup_code": "674415",
+            "cell_id": null
+          }
+        ]
+      },
+      "E1": {
+        "ok": true,
+        "200": 1,
+        "409": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3109,
+          "pickup_code": "836193",
+          "cell_id": 84
+        }
+      },
+      "E2": {
+        "ok": true,
+        "200": 1,
+        "非200": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3110,
+          "pickup_code": "112220",
+          "cell_id": 84
+        }
+      },
+      "未通过": []
+    },
+    {
+      "轮": 5,
+      "D": {
+        "ok": true,
+        "每件流水数": [
+          1,
+          1,
+          1
+        ],
+        "Σpaid_count": 3,
+        "包裹数": 3,
+        "清理": [
+          {
+            "package_id": 3111,
+            "pickup_code": "474455",
+            "cell_id": null
+          },
+          {
+            "package_id": 3112,
+            "pickup_code": "429206",
+            "cell_id": null
+          },
+          {
+            "package_id": 3113,
+            "pickup_code": "952511",
+            "cell_id": null
+          }
+        ]
+      },
+      "E1": {
+        "ok": true,
+        "200": 1,
+        "409": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3114,
+          "pickup_code": "020774",
+          "cell_id": 99
+        }
+      },
+      "E2": {
+        "ok": true,
+        "200": 1,
+        "非200": 9,
+        "SUCCESS流水": 1,
+        "清理": {
+          "package_id": 3115,
+          "pickup_code": "066070",
+          "cell_id": 99
+        }
+      },
+      "未通过": []
+    }
+  ]
+}
