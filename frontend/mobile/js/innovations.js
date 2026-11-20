@@ -604,6 +604,26 @@ function stopPayPoll() {
   }
 }
 
+/**
+ * 渲染支付二维码（本地生成，不联网、不依赖 CDN）。
+ * 二维码内容来自 create 响应的 qr_code_url；生成失败时隐藏画布，
+ * 由调用方展示 redirect_url 跳转按钮兜底。
+ */
+function renderPayQr(qrText) {
+  const wrap = aiEl("payQrWrap");
+  const canvas = aiEl("payQrCanvas");
+  if (!wrap || !canvas) return false;
+  try {
+    const ok = (typeof QRCodeMini !== "undefined") &&
+      QRCodeMini.toCanvas(canvas, qrText, { size: 200, margin: 3, ecc: "M" });
+    wrap.hidden = !ok;
+    return !!ok;
+  } catch (e) {
+    wrap.hidden = true;
+    return false;
+  }
+}
+
 /** 按服务端返回渲染支付卡片 */
 function renderPay(p) {
   const status = payStatusMeta(p.status);
@@ -623,6 +643,14 @@ function renderPay(p) {
   payState.providerLabel = label;
   aiEl("payProvider").textContent =
     label + (p.mock ? " · 不会真实扣款" : "");
+
+  // 二维码 / 跳转链接：**只来自 create 响应**（GET /pay/{id} 不返回这两个字段），
+  // 所以这里做「有才渲染、无则保持现状」的处理，不会把已画的二维码擦掉。
+  if (p.qr_code_url) renderPayQr(p.qr_code_url);
+  if (p.redirect_url) {
+    const jump = aiEl("btnPayJump");
+    if (jump) { jump.href = p.redirect_url; jump.hidden = false; }
+  }
 
   // 状态点
   const dot = aiEl("payDot");

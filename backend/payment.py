@@ -20,6 +20,8 @@
 import logging
 import os
 import random
+import threading
+import time
 from datetime import datetime, timedelta
 
 import db
@@ -165,6 +167,47 @@ def _idem_key(biz_type, biz_id):
 
 
 # ---------------------------------------------------------------------------
+# 匿名持取件码缴费的授权（BUG1 方案A）
+# ---------------------------------------------------------------------------
+# 为什么需要：触屏端「凭取件码取件 → 超时缴费」是匿名流程，没有 USER token；
+#   但用户必须能当场扫码付超时费。信任模型与 /business/pickup 完全一致：
+#   6 位取件码本身就是取走包裹的凭证，能取走自然也能为它付费。
+# 安全边界（从严，不放宽任何既有规则）：
+#   · 只开放 OVERTIME；寄件费涉及寄件人账户，仍必须登录后支付；
+#   · 取件码必须与 biz_id 指向同一件 RECEIVE 包裹，否则统一 403（避免枚举包裹）；
+#   · 包裹必须 EXPIRED 且未缴费（没超时不出现匿名付费入口；已付再建单会重复扣钱）；
+#   · 频控在 payment_api 侧按 IP 做（create / poll 各自独立桶）。
+def verify_overtime_pickup_code(biz_type, biz_id, pickup_code):
+    """校验"持码缴费"凭证，返回该包裹的 user_id（用于把支付单登记到正确用户名下）。"""
+    if (biz_type or "").upper() != BIZ_OVERTIME:
+        raise PaymentError("该支付需登录后发起", "FORBIDDEN", 403)
+    pkg = db.query_one(
+        "SELECT package_id, pickup_code, direction, status, overtime_fee_paid, user_id "
+        "FROM t_package WHERE package_id=%s", (int(biz_id),))
+    if (not pkg or pkg["direction"] != "RECEIVE"
+            or pkg["pickup_code"] != (pickup_code or "")):
+        raise PaymentError("取件码与包裹不匹配", "FORBIDDEN", 403)
+    if pkg["status"] != "EXPIRED":
+        raise PaymentError("该包裹当前无需支付超时费", "CONFLICT", 409)
+    if pkg["overtime_fee_paid"]:
+        raise PaymentError("该包裹超时费已支付，无需重复支付", "CONFLICT", 409)
+    return pkg["user_id"]
+
+
+def assert_pickup_code_for_order(order_row, pickup_code):
+    """匿名轮询授权：取件码必须与支付单对应的包裹一致（只读，不改任何状态）。"""
+    if (order_row.get("biz_type") or "").upper() != BIZ_OVERTIME:
+        raise PaymentError("该支付单不支持取件码查询", "FORBIDDEN", 403)
+    pkg = db.query_one(
+        "SELECT package_id, pickup_code, direction FROM t_package WHERE package_id=%s",
+        (int(order_row["biz_id"]),))
+    if (not pkg or pkg["direction"] != "RECEIVE"
+            or pkg["pickup_code"] != (pickup_code or "")):
+        raise PaymentError("取件码与支付单不匹配", "FORBIDDEN", 403)
+    return pkg
+
+
+# ---------------------------------------------------------------------------
 # 时间与序列化
 # ---------------------------------------------------------------------------
 def fmt_dt(value):
@@ -210,7 +253,7 @@ def _gen_pay_no():
 # ---------------------------------------------------------------------------
 # 创建支付单
 # ---------------------------------------------------------------------------
-def create_order(biz_type, biz_id, provider=None, user_id=None):
+def create_order(biz_type, biz_id, provider=None, user_id=None, refresh=False):
     """创建（或复用）支付单，返回契约 §4.1 的响应 dict。
 
     幂等策略：
@@ -248,7 +291,14 @@ def create_order(biz_type, biz_id, provider=None, user_id=None):
         if st == STATUS_SUCCESS:
             raise PaymentError("该业务单已支付成功，无需重复支付", "CONFLICT", 409)
         if st == STATUS_PENDING and existing["expire_at"] and existing["expire_at"] > now:
-            # 复用原单：金额以本次重算的为准（业务事实可能已变，如超时费调整）
+            # 复用原单：金额以本次重算的为准（业务事实可能已变，如超时费调整）。
+            # 真实支付宝模式下还必须**刷新二维码**（见 _refresh_alipay_pending），
+            # 否则返回的是几小时前那张旧码，用户扫了会提示"已过期/已失效"。
+            if prov == PROVIDER_ALIPAY and not is_mock:
+                return _refresh_alipay_pending(
+                    existing, amount=amount, user_id=user_id, prov=prov, label=label,
+                    is_mock=is_mock, expire_at=expire_at,
+                    degraded_reason=degraded_reason, refresh=refresh)
             db.execute(
                 "UPDATE t_pay_order SET amount=%s, user_id=COALESCE(%s, user_id) "
                 "WHERE pay_id=%s", (amount, user_id, existing["pay_id"]))
@@ -262,10 +312,13 @@ def create_order(biz_type, biz_id, provider=None, user_id=None):
             """UPDATE t_pay_order
                   SET pay_no=%s, amount=%s, provider=%s, provider_label=%s, is_mock=%s,
                       status='PENDING', expire_at=%s, paid_at=NULL, fail_reason=NULL,
-                      trade_no=NULL, user_id=COALESCE(%s, user_id), raw_payload=NULL
+                      trade_no=NULL, qr_code=NULL, user_id=COALESCE(%s, user_id),
+                      raw_payload=NULL
                 WHERE pay_id=%s""",
             (pay_no, amount, prov, label, is_mock, expire_at, user_id,
              existing["pay_id"]))
+        row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (existing["pay_id"],))
+        _ensure_alipay_qr(row)
         row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (existing["pay_id"],))
         return _order_payload(row, degraded_reason, reused=False)
 
@@ -278,7 +331,160 @@ def create_order(biz_type, biz_id, provider=None, user_id=None):
         (pay_no, biz_type, biz_id, user_id or biz_row.get("user_id"), amount,
          prov, label, is_mock, idem, expire_at))
     row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (pay_id,))
+    _ensure_alipay_qr(row)
+    row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (pay_id,))
     return _order_payload(row, degraded_reason, reused=False)
+
+
+def _alipay_trade_paid(node):
+    """交易是否已支付（支付宝 trade_status 口径）。"""
+    return (node.get("trade_status") or "").upper() in ("TRADE_SUCCESS", "TRADE_FINISHED")
+
+
+def _query_alipay_trade(pay_no):
+    try:
+        return alipay_client.query_trade(pay_no) or {}
+    except Exception as e:  # noqa: BLE001
+        log.warning("查询支付宝交易失败：%s", type(e).__name__)
+        return {}
+
+
+# 主动对账节流：pay_id -> 上次查询单调时钟。轮询 2s 一次，这里最多 3s 查一次，
+# 避免前端轮询把网关打爆（示范量级，不需要更复杂的分布式节流）。
+_QUERY_THROTTLE = {}
+_QUERY_MIN_INTERVAL = 3.0
+_QUERY_LOCK = threading.Lock()
+
+
+def reconcile_alipay_pending(pay_id):
+    """主动查支付宝交易并对账（无异步通知时的唯一兜底）。
+
+    为什么必须有：ALIPAY_NOTIFY_URL 为空时（本机 127.0.0.1 支付宝也回调不到），
+    用户真机付款后异步通知永远不会到达；若只依赖回调，支付单会一直 PENDING、
+    柜机永远不开门。这里在查询/轮询路径上主动 `alipay.trade.query` 一次，
+    查到 TRADE_SUCCESS/TRADE_FINISHED 且金额与快照一致就入账（mark_success 内部
+    用条件更新保证只入账一次）。
+
+    返回最新的订单行（未发生对账时原样返回）。
+    """
+    row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (int(pay_id),))
+    if not row or row["status"] != STATUS_PENDING or row["is_mock"]:
+        return row
+    if row["biz_type"] not in BIZ_TYPES or not row["pay_no"]:
+        return row
+
+    now = time.monotonic()
+    with _QUERY_LOCK:
+        last = _QUERY_THROTTLE.get(row["pay_id"], 0.0)
+        if now - last < _QUERY_MIN_INTERVAL:
+            return row
+        _QUERY_THROTTLE[row["pay_id"]] = now
+
+    node = _query_alipay_trade(row["pay_no"])
+    if not _alipay_trade_paid(node):
+        return row
+    paid_amount = node.get("total_amount")
+    try:
+        if paid_amount is not None and abs(
+                float(paid_amount) - float(row["amount"])) > 0.005:
+            log.warning("支付宝查单金额与支付单快照不一致，拒绝自动入账")
+            return row
+        mark_success(row["pay_id"], trade_no=node.get("trade_no"), paid_via="alipay")
+    except Exception:  # noqa: BLE001
+        log.exception("支付宝查单入账失败")
+        return row
+    return db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (int(pay_id),))
+
+
+def _close_alipay_trade(pay_no):
+    """best-effort 关闭支付宝交易（只对"已存在"的交易有效）。返回是否成功关闭。"""
+    try:
+        node = alipay_client.close_trade(pay_no)
+    except Exception as e:  # noqa: BLE001
+        log.warning("关闭支付宝交易失败：%s", type(e).__name__)
+        return False
+    if (node.get("code") or "") == "10000":
+        return True
+    sub = (node.get("sub_code") or "").lower()
+    # 交易不存在（还没被扫过）也视为"无需关闭"；ACQ.TRADE_NOT_EXIST 是下划线写法
+    return ("not_exist" in sub) or ("not-exist" in sub or "notexist" in sub) \
+        or ("交易不存在" in (node.get("sub_msg") or ""))
+
+
+def _ensure_alipay_qr(row):
+    """确保真实模式支付单有一张**缓存的**二维码；返回 qr_code 或 None。
+
+    只在"还没有缓存码"时调用 precreate，并立刻写回 t_pay_order.qr_code。
+    绝不在每次响应里重复 precreate —— 支付宝对同一 out_trade_no 再次预下单会换新码
+    并把旧码顶掉，那正是"用户扫了提示已失效"的直接原因。
+    """
+    if bool(row["is_mock"]) or row["status"] != STATUS_PENDING:
+        return None
+    if row.get("qr_code"):
+        return row["qr_code"]
+    qr = _build_alipay_qr(row)
+    if qr:
+        db.execute("UPDATE t_pay_order SET qr_code=%s WHERE pay_id=%s",
+                   (qr, row["pay_id"]))
+    return qr
+
+
+def _refresh_alipay_pending(existing, *, amount, user_id, prov, label, is_mock,
+                            expire_at, degraded_reason, refresh=False):
+    """复用 PENDING 支付单：默认返回**同一张有效码**，只在必要时换交易出新码。
+
+    支付宝实测（2026-11-20 探针，本项目真实沙箱）：
+      · 同一 out_trade_no 连续 precreate 返回**不同码串**，且旧码随之作废；
+      · 交易在被扫之前并不存在（query → ACQ.TRADE_NOT_EXIST）；
+      · 被扫过（WAIT_BUYER_PAY）后重复扫同一码会提示"二维码已失效"。
+    因此：
+      ① 默认复用缓存 qr_code，**绝不重复预下单**（否则把用户手里的码顶掉）；
+      ② 已支付 → 入账并 409；
+      ③ 码已被扫过（交易 WAIT_BUYER_PAY）→ 关闭旧交易并换 out_trade_no 重新出码
+         （旧码已无意义，关掉换号是安全的）；
+      ④ 前端显式 refresh=true → 换新交易出新码（"刷新二维码"按钮用）。
+    """
+    pay_id = existing["pay_id"]
+    old_pay_no = existing["pay_no"]
+    cached = existing.get("qr_code")
+    old_was_alipay = (not existing["is_mock"]) and existing["provider"] == PROVIDER_ALIPAY
+
+    node = {}
+    if old_was_alipay and old_pay_no:
+        node = _query_alipay_trade(old_pay_no)
+        if _alipay_trade_paid(node):
+            try:
+                mark_success(pay_id, trade_no=node.get("trade_no"), paid_via="alipay")
+            except Exception:  # noqa: BLE001
+                log.exception("复用支付单时发现已支付，但入账失败")
+            raise PaymentError("该业务单已支付成功，无需重复支付", "CONFLICT", 409)
+
+    need_new = bool(refresh) or not cached or not old_was_alipay
+    if not need_new and (node.get("trade_status") or "").upper() == "WAIT_BUYER_PAY":
+        # 码已被扫过：交易存在但未支付，再扫同一码会失效 → 关掉旧交易换新码
+        _close_alipay_trade(old_pay_no)
+        need_new = True
+
+    if not need_new:
+        db.execute(
+            "UPDATE t_pay_order SET amount=%s, user_id=COALESCE(%s, user_id) "
+            "WHERE pay_id=%s", (amount, user_id, pay_id))
+        row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (pay_id,))
+        return _order_payload(row, degraded_reason, reused=True)
+
+    pay_no = _gen_pay_no()
+    db.execute(
+        """UPDATE t_pay_order
+              SET pay_no=%s, amount=%s, provider=%s, provider_label=%s, is_mock=%s,
+                  status='PENDING', expire_at=%s, paid_at=NULL, fail_reason=NULL,
+                  trade_no=NULL, qr_code=NULL, user_id=COALESCE(%s, user_id),
+                  raw_payload=NULL
+            WHERE pay_id=%s""",
+        (pay_no, amount, prov, label, is_mock, expire_at, user_id, pay_id))
+    row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (pay_id,))
+    _ensure_alipay_qr(row)
+    row = db.query_one("SELECT * FROM t_pay_order WHERE pay_id=%s", (pay_id,))
+    return _order_payload(row, degraded_reason, reused=True)
 
 
 def _order_payload(row, degraded_reason=None, reused=False):
@@ -288,6 +494,9 @@ def _order_payload(row, degraded_reason=None, reused=False):
     redirect = None
     if not is_mock and row["status"] == STATUS_PENDING:
         redirect = _build_alipay_redirect(row)
+        # 二维码来自支付单上的缓存（首次 precreate 后写入）；普通复用**不重复预下单**，
+        # 否则支付宝会把用户手里那张码顶掉 —— 就是"扫码提示已失效"的根因。
+        qr = row.get("qr_code") or redirect
     return {
         "pay_id": row["pay_id"],
         "pay_no": row["pay_no"],
@@ -297,6 +506,10 @@ def _order_payload(row, degraded_reason=None, reused=False):
         "mock": is_mock,
         "status": row["status"],
         "expire_at": iso_expire(row["expire_at"]),
+        # 系统订单有效期是否已过（PENDING 且 expire_at 已到）。前端据此提示
+        # "支付单已过期，请重新获取二维码"，而不是继续展示一张已失效的码。
+        "expired": bool(row["status"] == STATUS_PENDING and row["expire_at"]
+                        and row["expire_at"] <= datetime.now()),
         "degraded": bool(degraded_reason),
         "degraded_reason": degraded_reason,
         "qr_code_url": qr,
@@ -310,10 +523,30 @@ def _build_alipay_redirect(row):
     try:
         params = alipay_client.build_page_pay_params(
             row["pay_no"], float(row["amount"]),
-            subject=f"智能快递柜-{row['biz_type']}")
+            subject=f"智能快递柜-{row['biz_type']}",
+            # 交易有效期与"系统订单有效期"对齐：每次 create 都会重建交易并重新计时，
+            # 避免出现"系统订单还有效、支付宝交易却已超时"的错位。
+            timeout_express=f"{expire_minutes()}m")
         return alipay_client.gateway_with_params(params)
     except Exception as e:  # noqa: BLE001
         log.warning("生成支付宝跳转地址失败：%s", type(e).__name__)
+        return None
+
+
+def _build_alipay_qr(row):
+    """真实沙箱模式：调 precreate 换真二维码内容（qr_code）。失败返回 None。
+
+    注意：每次 create（含复用）都会调到这里，但只有 out_trade_no 变了才会拿到**新码**
+    （支付宝对同一 out_trade_no 只返回同一张旧码）。复用时的换号逻辑见
+    _refresh_alipay_pending —— 那是"扫码提示已过期"的根因修复。
+    """
+    try:
+        return alipay_client.precreate(
+            row["pay_no"], float(row["amount"]),
+            subject=f"智能快递柜-{row['biz_type']}",
+            timeout_express=f"{expire_minutes()}m")
+    except Exception as e:  # noqa: BLE001
+        log.warning("支付宝预下单(二维码)失败：%s", type(e).__name__)
         return None
 
 
@@ -338,6 +571,8 @@ def get_order(pay_id):
         "biz_type": row["biz_type"],
         "biz_id": row["biz_id"],
         "expire_at": iso_expire(row["expire_at"]),
+        "expired": bool(row["status"] == STATUS_PENDING and row["expire_at"]
+                        and row["expire_at"] <= datetime.now()),
     }
 
 

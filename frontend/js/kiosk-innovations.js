@@ -99,14 +99,17 @@ function kaiRenderPayProvider(p) {
   const note = document.getElementById("payProviderNote");
   if (!tag || !note) return;
 
-  const label = (p && (p.provider_label || p.provider)) || "模拟支付";
+  // 后端没给就用中性占位，绝不默认成"模拟支付"——真实沙箱模式下那样会误导用户
+  const label = (p && (p.provider_label || p.provider)) || "--";
   tag.textContent = label;
 
   const isMock = !!(p && p.mock);
   tag.className = "pay-provider-tag" + (isMock ? " mock" : " real");
-  note.textContent = isMock
-    ? "演示环境，不会真实扣款"
-    : "支付结果以服务端返回为准";
+  note.textContent = !p
+    ? "正在获取支付渠道…"
+    : isMock
+      ? "演示环境，不会真实扣款"
+      : "支付结果以服务端返回为准";
 }
 
 /**

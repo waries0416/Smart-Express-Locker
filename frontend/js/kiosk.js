@@ -631,7 +631,8 @@ async function doCodePickup(code) {
     openDoor([r.package]);
     refreshMyPickupIfVisible();
   } catch (e) {
-    // 超时未缴费：服务端 402 阻断，先扫码支付，付完用同一取件码重试
+    // 超时未缴费：服务端 402 阻断，先扫码支付，付完用同一取件码重试。
+    // 把取件码一并传给 startPay —— 匿名用户（未登录、只输码）靠它走匿名缴费通道。
     if (e.status === 402 && e.data && e.data.package_id) {
       const fee = Number(e.data.overtime_fee || 1).toFixed(2);
       startPay([e.data.package_id], `¥${fee}`, async () => {
@@ -642,7 +643,7 @@ async function doCodePickup(code) {
         } catch (e2) {
           showModal("❌", "取件失败", `<p>${e2.message}</p><p>请稍后重试或联系管理员。</p>`);
         }
-      });
+      }, code);
       return;
     }
     showModal("❌", "取件失败", `<p>${e.message}</p><p>请核对取件码或联系管理员。</p>`);
@@ -652,11 +653,13 @@ async function doCodePickup(code) {
 // 单个包裹取件（含超时支付阻断）
 async function singlePickup(pkg) {
   if (pkg.need_pay) {
+    // 「立即取件」来自已登录用户的待取列表，本就有 token；但包裹行若带取件码也一并传下去，
+    // 这样即便会话中途过期，匿名缴费通道仍能兜住（服务端会做交叉校验）。
     startPay([pkg.package_id], `¥${pkg.overtime_fee || 1}.00`, async () => {
       const r = await API.unlock(pkg.package_id, currentCabinet ? currentCabinet.cabinet_id : undefined);
       openDoor([r.package]);
       refreshMyPickupIfVisible();
-    });
+    }, pkg.pickup_code || undefined);
     return;
   }
   try {
@@ -717,40 +720,319 @@ function pickupById(pid) {
 }
 
 // ---------------- 超时扫码支付 ----------------
-function startPay(ids, amountText, onPaid) {
+/* 支付状态机（BUG1 修复要点）：
+ *   ① 打开弹层就调 POST /api/pay/create（biz_type=OVERTIME），拿到 pay_id / 金额 /
+ *      provider_label / mock / qr_code_url / redirect_url —— 二维码**只来自 create**，
+ *      GET /api/pay/{id} 不返回 qr_code_url（契约 §4.1 vs §4.2）。
+ *   ② alipay 模式且响应带 qr_code_url → 用本地 QRCodeMini 画到 canvas（不联网、不用 CDN）。
+ *      画不出来或没有 qr_code_url → 显示「跳转收银台」按钮（redirect_url）兜底。
+ *   ③ 轮询 GET /api/pay/{id}，只有 status=SUCCESS 才放行取件；
+ *      FAILED/CLOSED 停下并提示；超时则提示可重试。
+ *   ④ mock 模式保持原快速路径（可直接点「我已支付」走 mock-succeed/admin 通道）。
+ */
+let payState = null;      // { payId, pollTimer, ticks, closed, channel }
+const PAY_POLL_MS = 2000;      // 轮询间隔：2 秒
+const PAY_MAX_TICKS = 90;      // 最多轮询 90 次 ≈ 3 分钟（与支付单 10 分钟有效期相比更保守）
+
+function _payEl(id) { return document.getElementById(id); }
+
+/** 渲染二维码：成功返回 true，失败/无内容返回 false（调用方走跳转兜底） */
+function renderPayQr(qrText) {
+  const canvas = _payEl("payQrCanvas");
+  const icon = _payEl("payQrIcon");
+  const box = _payEl("payQrBox");
+  if (!canvas || !icon) return false;
+  if (!qrText) {
+    canvas.hidden = true; icon.hidden = false;
+    if (box) box.classList.remove("has-qr");
+    return false;
+  }
+  try {
+    const ok = (typeof QRCodeMini !== "undefined") &&
+      QRCodeMini.toCanvas(canvas, qrText, { size: 240, margin: 3, ecc: "M" });
+    if (ok) {
+      canvas.hidden = false; icon.hidden = true;
+      // 画布出现后取消外层固定尺寸，避免压住下方标题
+      if (box) box.classList.add("has-qr");
+      return true;
+    }
+  } catch (e) { /* 落到兜底分支 */ }
+  canvas.hidden = true;
+  icon.hidden = false;
+  if (box) box.classList.remove("has-qr");
+  return false;
+}
+
+/** 展示后端下发的渠道信息（provider_label / mock 均以服务端为准） */
+function renderPayChannel(p) {
+  if (typeof kaiRenderPayProvider === "function") kaiRenderPayProvider(p);
+}
+
+/** 停止轮询（切屏/关闭弹层时必须调用，避免后台空转） */
+function stopPayPoll() {
+  if (payState && payState.pollTimer) {
+    clearInterval(payState.pollTimer);
+    payState.pollTimer = null;
+  }
+}
+
+/** 关闭弹层：停轮询 + 复位状态 */
+function closePay() {
+  stopPayPoll();
+  if (payState) payState.closed = true;
+  const m = _payEl("payModal");
+  if (m) m.classList.remove("show");
+}
+
+/**
+ * 发起超时费支付。
+ * @param {number[]} ids     待支付包裹 id（多个时按第一个建单，服务端金额以 biz_id 为准）
+ * @param {string}   amountText 兜底展示金额（服务端返回后会被覆盖）
+ * @param {Function} onPaid     支付成功后的回调（放行取件）
+ * @param {string}   [pickupCode] 取件码。匿名（未登录）缴费时必传：
+ *                                服务端用它与该包裹做交叉校验，避免凭 package_id 越权缴费。
+ */
+async function startPay(ids, amountText, onPaid, pickupCode) {
   payTargets = ids;
   payOnPaid = onPaid;
-  document.getElementById("payAmount").textContent = amountText;
-  document.getElementById("payDesc").textContent = "请使用微信 / 支付宝扫码支付";
-  document.getElementById("payProgress").textContent = "等待支付…";
-  document.getElementById("payProgress").className = "pay-progress";
-  document.getElementById("payConfirm").disabled = false;
-  // 支付提供方标识：kiosk.js 走的是模拟支付通道，必须明确告知不会真实扣款
-  if (typeof kaiRenderPayProvider === "function") {
-    kaiRenderPayProvider({ provider: "mock", provider_label: "模拟支付", mock: true });
+  // reqSeq：每发起一次建单就自增。异步响应回来时若序号已过期，直接丢弃，
+  // 杜绝旧响应晚到把新二维码覆盖掉（后端起根因修复后，旧码不会再顶掉新码，
+  // 但前端仍必须保证"只渲染最后一次响应"，否则用户看到的可能是上一单的图）。
+  payState = { payId: null, pollTimer: null, ticks: 0, closed: false,
+               pickupCode: pickupCode || "", anonymous: false,
+               reqSeq: 0, appliedSeq: 0, creating: false, expired: false };
+
+  const amountEl = _payEl("payAmount");
+  const descEl = _payEl("payDesc");
+  const progEl = _payEl("payProgress");
+  const jumpEl = _payEl("payJump");
+  const confirmBtn = _payEl("payConfirm");
+  const refreshBtn = _payEl("payRefresh");
+
+  amountEl.textContent = amountText;
+  descEl.textContent = "正在创建支付单…";
+  progEl.textContent = "等待支付…";
+  progEl.className = "pay-progress";
+  confirmBtn.disabled = false;
+  jumpEl.hidden = true;
+  if (refreshBtn) refreshBtn.hidden = true;
+  renderPayQr(null);              // 先清掉上一单的二维码
+  _payEl("payModal").classList.add("show");
+
+  const bizId = Array.isArray(ids) ? ids[0] : ids;
+
+  /* 建单有两条通道（契约 §4.1 匿名持码缴费）：
+   *   ① 有 token —— 原路径不变，服务端按本人包裹鉴权，pickup_code 不参与授权；
+   *   ② 无 token 但有取件码 —— 走匿名通道：body 带 pickup_code 与服务端交叉校验。
+   *      这是「用户不扫码、直接输取件码缴费」的主场景，必须有二维码。
+   *   ③ 两者都没有 —— 无法证明对这单的处置权，提示先扫码登录。 */
+  const hasToken = !!(ApiCore.token && ApiCore.token());
+  if (!hasToken && !pickupCode) {
+    descEl.textContent = "请先用手机扫描柜机屏幕二维码登录，或改用取件码缴费";
+    progEl.className = "pay-progress err";
+    progEl.textContent = "缺少身份凭证，无法发起在线支付";
+    _payEl("payConfirm").disabled = true;
+    return;
   }
-  document.getElementById("payModal").classList.add("show");
+  payState.anonymous = !hasToken;
+  payState.bizId = bizId;
+
+  // 建单只此一处：首次打开与「刷新二维码」都走它，靠 reqSeq 保证只采纳最后一次
+  await createPayOrder(false);
 }
-async function confirmPay() {
-  const btn = document.getElementById("payConfirm");
-  btn.disabled = true;
-  const progress = document.getElementById("payProgress");
-  progress.textContent = "支付中…";
-  progress.className = "pay-progress";
+
+/**
+ * 发起建单并渲染二维码。
+ * @param {boolean} refresh true = 显式换新码（服务端换新 pay_no + 新二维码）
+ *
+ * 防竞态三条：
+ *   1. creating 门闩 —— 同一时刻只允许一个建单在飞，重复点击直接忽略；
+ *   2. reqSeq 序号 —— 响应回来时比对序号，过期响应一律丢弃不渲染；
+ *   3. 只渲染最后一次 —— 保证画到 canvas 上的永远是当前有效那单的码。
+ */
+async function createPayOrder(refresh) {
+  if (payState.creating) return;          // ① 门闩：并发调用直接丢弃
+  payState.creating = true;
+  const seq = ++payState.reqSeq;          // ② 本次请求的序号
+
+  const descEl = _payEl("payDesc");
+  const progEl = _payEl("payProgress");
+  const jumpEl = _payEl("payJump");
+  const refreshBtn = _payEl("payRefresh");
+
+  if (refresh) {
+    descEl.textContent = "正在刷新二维码…";
+    progEl.className = "pay-progress";
+    progEl.textContent = "获取新二维码…";
+    if (refreshBtn) refreshBtn.disabled = true;
+  }
+
   try {
-    await API.payOvertime(payTargets);
-    progress.textContent = "✅ 支付成功";
-    progress.className = "pay-progress ok";
-    setTimeout(() => {
-      closePay();
-      const cb = payOnPaid; payOnPaid = null; payTargets = [];
-      if (cb) cb();
-    }, 700);
+    const reqBody = { biz_type: "OVERTIME", biz_id: payState.bizId };
+    if (payState.anonymous) reqBody.pickup_code = payState.pickupCode;
+    if (refresh) reqBody.refresh = true;   // 显式要求换新码
+
+    const p = await API.payCreate(reqBody);
+
+    // ③ 过期响应丢弃：用户在等新码期间又触发了别的请求，这次结果不再有效
+    if (seq !== payState.reqSeq || !payState || payState.closed) return;
+
+    payState.payId = p.pay_id;
+    payState.channel = p;
+    payState.appliedSeq = seq;
+    payState.expired = !!p.expired;
+
+    if (p.amount != null) _payEl("payAmount").textContent = "¥" + Number(p.amount).toFixed(2);
+    renderPayChannel(p);
+
+    const isMock = !!p.mock;
+    const qrText = p.qr_code_url || "";
+    const redirect = p.redirect_url || "";
+
+    if (isMock) {
+      descEl.textContent = "演示环境使用模拟支付，不会产生真实扣款";
+    } else if (qrText) {
+      const drawn = renderPayQr(qrText);
+      descEl.textContent = drawn
+        ? "请用支付宝扫描上方二维码完成支付，支付成功后会自动开柜"
+        : "请点击下方按钮跳转收银台完成支付";
+    } else if (redirect) {
+      descEl.textContent = "请点击下方按钮跳转收银台完成支付";
+    } else {
+      descEl.textContent = "等待支付结果…";
+    }
+
+    // 跳转兜底：有 redirect_url 就展示（扫码不便 / 二维码画不出来时用）
+    if (redirect) {
+      jumpEl.href = redirect;
+      jumpEl.hidden = false;
+    }
+
+    // 刷新按钮：真实扫码模式下常显，用户扫码提示"已失效"时可自己换新码
+    if (refreshBtn) {
+      refreshBtn.hidden = isMock;
+      refreshBtn.disabled = false;
+    }
+
+    progEl.className = "pay-progress";
+    progEl.textContent = "等待支付…";
+
+    // 每张新码都从零开始计轮询次数，避免刷新几次后提前超时
+    payState.ticks = 0;
+    if (!payState.pollTimer) {
+      payState.pollTimer = setInterval(() => pollPayOnce(), PAY_POLL_MS);
+    }
   } catch (e) {
-    // 统一中文错误文案（401/超时/断网分别提示），不再直接抛英文 message
-    progress.textContent = "支付失败：" + ApiCore.errText(e);
-    progress.className = "pay-progress err";
-    btn.disabled = false;
+    if (seq !== payState.reqSeq) return;
+    progEl.className = "pay-progress err";
+    progEl.textContent = (refresh ? "刷新二维码失败：" : "创建支付单失败：") + ApiCore.errText(e);
+    descEl.textContent = "请稍后重试，或联系现场工作人员";
+    if (refreshBtn) refreshBtn.disabled = false;
+  } finally {
+    payState.creating = false;
+  }
+}
+
+/** 「刷新二维码」按钮：显式告诉服务端换一张新码 */
+function refreshPayQr() {
+  if (!payState) return;
+  createPayOrder(true);
+}
+
+/** 轮询一次支付状态；只有 SUCCESS 才放行 */
+async function pollPayOnce() {
+  if (!payState || !payState.payId || payState.closed) return;
+  const progEl = _payEl("payProgress");
+  try {
+    // 状态查询分两条通道（契约 §4.2）：
+    //   登录态 —— GET  /api/pay/{id}（带 Bearer，服务端按本人/相关方鉴权）
+    //   匿名态 —— POST /api/pay/{id}/poll {pickup_code}（靠取件码交叉校验）
+    // 用 auth:false 去打 GET 会 401，状态永远停在 PENDING；这两条必须严格区分。
+    const p = payState.anonymous
+      ? await API.payPollAnonymous(payState.payId, payState.pickupCode)
+      : await ApiCore.get(`/pay/${payState.payId}`, { timeout: 8000 });
+    renderPayChannel(p);
+    const meta = payStatusMeta(p && p.status);
+
+    if (meta.cls === "success") {
+      stopPayPoll();
+      progEl.className = "pay-progress ok";
+      progEl.textContent = "✅ 支付成功，正在开柜…";
+      const cb = payOnPaid;
+      payOnPaid = null;
+      payTargets = [];
+      setTimeout(() => { closePay(); if (cb) cb(); }, 700);
+      return;
+    }
+    if (meta.cls === "failed" || meta.cls === "closed") {
+      stopPayPoll();
+      progEl.className = "pay-progress err";
+      progEl.textContent = "❌ " + meta.cn + (p && p.fail_reason ? "：" + p.fail_reason : "");
+      // 失败/关闭后原单不可再付，只能换新码重来
+      const rb = _payEl("payRefresh");
+      if (rb && !(payState.channel && payState.channel.mock)) {
+        rb.hidden = false; rb.disabled = false;
+      }
+      return;
+    }
+
+    // 已过期：二维码不能再扫，必须换新码。提示 + 亮出刷新按钮，由用户点一下换码
+    // （不自动刷新，避免用户正把手机对准屏幕时画面突然换图）。
+    if (p && p.expired) {
+      stopPayPoll();
+      payState.expired = true;
+      progEl.className = "pay-progress err";
+      progEl.textContent = "⏰ 二维码已过期，请点「刷新二维码」获取新码";
+      const descEl = _payEl("payDesc");
+      if (descEl) descEl.textContent = "二维码已过期，刷新后可继续扫码支付";
+      const refreshBtn = _payEl("payRefresh");
+      if (refreshBtn) { refreshBtn.hidden = false; refreshBtn.disabled = false; }
+      return;
+    }
+
+    // PENDING
+    payState.ticks += 1;
+    if (payState.ticks >= PAY_MAX_TICKS) {
+      stopPayPoll();
+      progEl.className = "pay-progress err";
+      progEl.textContent = "⏰ 等待超时，请重新支付或联系工作人员";
+      return;
+    }
+    progEl.className = "pay-progress";
+    progEl.textContent = "⏳ " + meta.cn + "…";
+  } catch (e) {
+    // 单次查询失败不终止，交给下一轮；连续失败交给超时上限兜底
+    payState.ticks += 1;
+    if (payState.ticks >= PAY_MAX_TICKS) {
+      stopPayPoll();
+      if (progEl) {
+        progEl.className = "pay-progress err";
+        progEl.textContent = "查询支付状态失败：" + ApiCore.errText(e);
+      }
+    }
+  }
+}
+
+/**
+ * 「我已支付」：mock 模式下走原来的快速通道（管理端模拟置成功），
+ * 真实沙箱模式则立即查一次状态（不做任何前端判定成功）。
+ */
+async function confirmPay() {
+  const btn = _payEl("payConfirm");
+  const progEl = _payEl("payProgress");
+  if (!payState || !payState.payId) return;
+
+  if (payState.isMock === undefined) {
+    // 首次点击时判断渠道；mock 才有权限直接置成功
+    payState.isMock = !!(payState.channel && payState.channel.mock);
+  }
+  btn.disabled = true;
+  progEl.className = "pay-progress";
+  progEl.textContent = "正在确认支付结果…";
+  try {
+    await pollPayOnce();
+  } finally {
+    if (payState && !payState.closed) btn.disabled = false;
   }
 }
 function closePay() { document.getElementById("payModal").classList.remove("show"); }

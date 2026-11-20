@@ -157,6 +157,8 @@ CREATE TABLE t_package (
     pickup_time  DATETIME     NULL                     COMMENT '实际取件/揽收时间',
     recipient_name  VARCHAR(30)  NULL                  COMMENT '收件人姓名（寄件单填写）',
     recipient_phone VARCHAR(20)  NULL                  COMMENT '收件人手机号（寄件单填写）',
+    sender_address    VARCHAR(120) NULL                COMMENT '寄件人地址（寄件单填写，BUG2）',
+    recipient_address VARCHAR(120) NULL                COMMENT '收件人地址（寄件单填写，BUG2）',
     from_send_id    INT          NULL                  COMMENT '投递包裹关联的寄件单ID（自引用，SEND方向）',
     note         VARCHAR(200) NULL                     COMMENT '备注',
     overtime_fee        DECIMAL(6,2) NULL              COMMENT '超时保管费(元)，超时未取时计收',
@@ -540,6 +542,7 @@ CREATE TABLE t_pay_order (
     amount           DECIMAL(10,2) NOT NULL               COMMENT '金额(元)——服务端快照',
     provider         VARCHAR(20)  NOT NULL DEFAULT 'mock' COMMENT '渠道 mock/alipay_sandbox',
     provider_label   VARCHAR(20)  NOT NULL DEFAULT '模拟支付' COMMENT '中文展示文案',
+    qr_code          VARCHAR(255) NULL                    COMMENT '支付宝预下单二维码内容（缓存；普通复用返回同一张码，避免被新码顶掉）',
     is_mock          TINYINT      NOT NULL DEFAULT 1      COMMENT '是否模拟渠道 0/1',
     status           VARCHAR(12)  NOT NULL DEFAULT 'PENDING'
                      COMMENT '状态 PENDING/SUCCESS/FAILED/CLOSED',

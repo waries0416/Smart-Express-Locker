@@ -295,6 +295,9 @@ function renderHistory(list) {
 }
 
 async function loadSendOptions() {
+  // 寄件人姓名默认取账号姓名；用户可改，所以只在为空时预填，不覆盖已输入内容
+  const nameInput = $("sendSenderName");
+  if (nameInput && !nameInput.value) nameInput.value = (state.identity || {}).name || "";
   try {
     const [comps, cabs] = await Promise.all([
       api("/companies?size=100"),
@@ -452,17 +455,24 @@ async function reopen() {
 async function submitSend() {
   const err = $("sendErr");
   err.textContent = "";
+  const id = state.identity || {};
   const body = {
-    user_phone: (state.identity || {}).phone,
-    user_name: (state.identity || {}).name,
+    user_phone: id.phone,
+    // 寄件人姓名允许在表单里改（默认是账号姓名），空则回落到账号姓名
+    user_name: ($("sendSenderName").value.trim() || id.name || ""),
+    // 寄件人地址：选填。后端未支持时会被忽略，不会阻断下单
+    sender_address: $("sendSenderAddress").value.trim() || null,
     recipient_name: $("sendRecipientName").value.trim(),
     recipient_phone: $("sendRecipientPhone").value.trim(),
+    // 收件人地址：选填
+    recipient_address: $("sendRecipientAddress").value.trim() || null,
     size_type: $("sendSize").value,
     weight: Number($("sendWeight").value) || 0,
     company_id: Number($("sendCompany").value),
     cabinet_id: Number($("sendCabinet").value),
     note: $("sendNote").value.trim() || null,
   };
+  // 只有手机号是硬校验；地址一律选填，不参与拦截
   if (!/^1[3-9]\d{9}$/.test(body.recipient_phone)) {
     err.textContent = "收件人手机号格式不正确";
     return;

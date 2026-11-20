@@ -28,6 +28,23 @@ SIZE_WEIGHT_LIMIT = {
 _SIZE_CN = {"SMALL": "小件", "MEDIUM": "中件", "LARGE": "大件"}
 
 
+def _parse_address(value, label):
+    """解析寄件/收件地址（BUG2）：去首尾空白、≤120 字符，未填返回 None（向后兼容）。
+
+    地址是**可选字段**：老调用方不传时按 NULL 入库，行为与改造前完全一致；
+    传了但超长则明确 400，而不是静默截断——地址截断会直接把件送错地方。
+    返回 (地址或 None, 错误文案或 None)。
+    """
+    if value in (None, ""):
+        return None, None
+    text = str(value).strip()
+    if not text:
+        return None, None
+    if len(text) > 120:
+        return None, f"{label}过长（最多 120 个字符，当前 {len(text)} 个）"
+    return text, None
+
+
 def _check_weight_limit(size_type, weight):
     """校验重量是否超过所选规格格口的限重；超限返回明确提示文案，合规返回 None。"""
     limit = SIZE_WEIGHT_LIMIT.get(size_type)
@@ -339,6 +356,15 @@ def send_order():
     cabinet_id = body.get("cabinet_id")
     weight = body.get("weight") or 0
     note = body.get("note")
+    # BUG2：寄件/收件地址（可选，≤120 字符；不传按 NULL 入库，老调用方零影响）
+    sender_address, addr_err = _parse_address(
+        body.get("sender_address"), "寄件人地址")
+    if addr_err:
+        return jsonify({"error": addr_err}), 400
+    recipient_address, addr_err = _parse_address(
+        body.get("recipient_address"), "收件人地址")
+    if addr_err:
+        return jsonify({"error": addr_err}), 400
     # 创新点 2：可选推荐引用。非法值按"没传"处理，老调用方零影响。
     pack_rec_id = _parse_recommendation_id(body.get("pack_recommendation_id"))
 
@@ -389,13 +415,14 @@ def send_order():
                 """INSERT INTO t_package(direction, tracking_no, courier_id, user_id, company_id,
                                          cabinet_id, cell_id, size_type, weight, status, pickup_code,
                                          store_time, expire_time, recipient_name, recipient_phone,
+                                         sender_address, recipient_address,
                                          note, overtime_fee, overtime_fee_paid,
                                          pack_recommendation_id)
                    VALUES('SEND',%s,NULL,%s,%s,%s,%s,%s,%s,'SEND_WAIT_PICKUP',%s,NOW(),
-                         DATE_ADD(NOW(),INTERVAL 48 HOUR),%s,%s,%s,NULL,0,%s)""",
+                         DATE_ADD(NOW(),INTERVAL 48 HOUR),%s,%s,%s,%s,%s,NULL,0,%s)""",
                 (tracking_no, user["user_id"], company_id, cell["cabinet_id"], cell["cell_id"],
                  size_type, weight, pickup_code, recipient_name,
-                 recipient_phone, note, pack_rec_id))
+                 recipient_phone, sender_address, recipient_address, note, pack_rec_id))
             pid = cur.lastrowid
             cur.execute("UPDATE t_cell SET status='OCCUPIED' WHERE cell_id=%s", (cell["cell_id"],))
     except Exception as e:
@@ -419,6 +446,9 @@ def send_order():
         "company_name": detail["company_name"],
         "recipient_name": detail.get("recipient_name"),
         "recipient_phone": detail.get("recipient_phone"),
+        # BUG2：把本次填写的地址原样回显（_detail 走的是视图，视图不含新列）
+        "sender_address": sender_address,
+        "recipient_address": recipient_address,
         "expire_time": detail["expire_time"],
         "package": detail,
         **({"pack_task_id": pack_task_id} if pack_rec_id else {}),
@@ -544,8 +574,11 @@ def _send_order_row(p, detail=None):
         "company_name": d.get("company_name"),
         "sender_name": d.get("user_name"),
         "sender_phone": d.get("user_phone"),
+        # BUG2：寄件/收件地址（历史数据为 NULL，前端按"未填写"展示）
+        "sender_address": p.get("sender_address"),
         "recipient_name": p.get("recipient_name"),
         "recipient_phone": p.get("recipient_phone"),
+        "recipient_address": p.get("recipient_address"),
         "delivery": None,   # 由调用方填充（见 my-packages）
     }
 

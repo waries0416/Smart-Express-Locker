@@ -139,10 +139,19 @@
         <div class="ai-tip" id="sendAiTip"></div>
       </div>
       <div class="card">
+        <div class="field-group-title">寄件人</div>
+        <label class="field"><span>寄件人姓名</span>
+          <input id="sendSenderName" placeholder="默认取账号姓名，可修改" maxlength="30" /></label>
+        <label class="field"><span>寄件人地址</span>
+          <input id="sendSenderAddress" placeholder="选填，如：阳光花园小区 3 栋 502" maxlength="120" /></label>
+
+        <div class="field-group-title">收件人</div>
         <label class="field"><span>收件人</span>
           <input id="sendRecipientName" placeholder="收件人姓名" maxlength="30" /></label>
         <label class="field"><span>收件人手机号</span>
           <input id="sendRecipientPhone" type="tel" inputmode="numeric" maxlength="11" placeholder="11 位手机号" /></label>
+        <label class="field"><span>收件人地址</span>
+          <input id="sendRecipientAddress" placeholder="选填，如：北京市朝阳区建国路 88 号" maxlength="120" /></label>
         <div class="grid2">
           <label class="field"><span>规格</span>
             <select id="sendSize">
@@ -306,6 +315,15 @@
         <div class="pay-amount" id="payAmount">¥0.00</div>
         <div class="pay-provider" id="payProvider">--</div>
 
+        <!-- 真实沙箱模式：展示可扫描的二维码（本地生成，不依赖外网） -->
+        <div class="pay-qr-wrap" id="payQrWrap" hidden>
+          <canvas id="payQrCanvas" class="pay-qr-canvas"></canvas>
+          <p class="hint center">请用支付宝扫码支付</p>
+        </div>
+        <!-- 扫码不便时直接跳收银台 -->
+        <a class="btn ghost block pay-jump" id="btnPayJump" href="#" target="_blank"
+           rel="noopener" hidden>🔗 打不开扫码？点此跳转收银台</a>
+
         <div class="pay-status-row">
           <span class="pay-status-dot" id="payDot"></span>
           <span class="pay-status-text" id="payStatusText">处理中</span>
@@ -408,6 +426,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="/js/api-core.js"></script>
+<script src="/js/qrcode-mini.js"></script>
 <script src="/m/js/api-mobile.js"></script>
 <script src="/m/js/app.js"></script>
 <script src="/m/js/innovations.js"></script>

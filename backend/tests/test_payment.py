@@ -1,4 +1,4 @@
-# 创新点 4 · 支付 · 离线单元测试
+﻿# 创新点 4 · 支付 · 离线单元测试
 #
 # 覆盖点（每一条都对应契约里的一条防刷设计）：
 #   1) 金额快照：请求里带 amount 一律忽略，金额由服务端按业务单重算；
@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 os.environ.setdefault("NOTIFY_WORKER", "0")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -153,9 +154,17 @@ class AlipayCryptoTest(unittest.TestCase):
         self.assertFalse(alipay_client.verify("x=1", "!!!not-base64!!!", self.public_pem))
         self.assertFalse(alipay_client.verify("x=1", "", self.public_pem))
 
-    def test_sign_content_excludes_sign_fields(self):
+    def test_sign_content_request_vs_notify_exclusion(self):
         params = {"a": "1", "sign": "xxx", "sign_type": "RSA2", "b": "", "c": "3"}
-        self.assertEqual(alipay_client.sign_content(params), "a=1&c=3")
+        # 同步请求签名：只排除 sign，**sign_type 要参与**。
+        # BUG1 证据：沙箱网关回显的待签串里含 sign_type=RSA2；旧实现把它排除了，
+        # 导致所有真实请求（page.pay / precreate）都被判 isv.invalid-signature，
+        # 页面支付只能看到支付宝的验签错误页、永远拿不到可扫的二维码。
+        self.assertEqual(alipay_client.sign_content(params), "a=1&c=3&sign_type=RSA2")
+        # 异步通知验签：sign 与 sign_type 都排除（支付宝文档口径，与同步请求不同）
+        self.assertEqual(
+            alipay_client.sign_content(params, alipay_client.NOTIFY_SIGN_EXCLUDE),
+            "a=1&c=3")
 
     def test_sign_content_sorted_ascii(self):
         params = {"b": "2", "a": "1", "C": "3"}
@@ -330,6 +339,264 @@ class AlipayCryptoMissingApiTest(unittest.TestCase):
             self.assertEqual(resp.get_json()["status"], "SUCCESS")
         finally:
             restore()
+
+
+# ===========================================================================
+# 一·六、BUG1 回归：真实（沙箱）模式下 create 必须给出可编码的二维码内容
+# ===========================================================================
+@unittest.skipUnless(_db_ready(), "需要 MySQL 数据库")
+class AlipayQrPayloadTest(unittest.TestCase):
+    """BUG1（用户实测：支付宝沙箱支付页面没有二维码）的回归。
+
+    根因两处，均已修复：
+      1) 同步请求签名把 sign_type 也排除了 → 沙箱网关 isv.invalid-signature
+         （回归见 test_sign_content_request_vs_notify_exclusion）；
+      2) create 响应里 qr_code_url 恒为 None（只有 redirect_url），前端因此没有
+         任何可编码成二维码的内容。
+    本类用假签名器 + 假 HTTP 响应离线验证 (2)：真实模式下 qr_code_url 非空；
+    预下单失败时退回"用跳转地址当二维码内容"，且建单本身仍然成功。
+    """
+
+    KEYS = ("PAYMENT_PROVIDER", "ALIPAY_APP_ID", "ALIPAY_PRIVATE_KEY",
+            "ALIPAY_PUBLIC_KEY", "ALIPAY_SANDBOX")
+
+    def setUp(self):
+        app_module.app.config.update(TESTING=True)
+        self.client = app_module.app.test_client()
+        self._saved_env = {k: os.environ.get(k) for k in self.KEYS}
+        self._saved_backend = alipay_client._KEY_BACKEND
+        # 假签名器：不接触真实密钥，把测试聚焦在"建单是否产出 qr_code_url"
+        alipay_client._KEY_BACKEND = lambda op, *args: "FAKE_SIGN"
+        os.environ.update({
+            "PAYMENT_PROVIDER": "alipay",
+            "ALIPAY_APP_ID": "2021000000000000",
+            "ALIPAY_PRIVATE_KEY": "dummy-private-key",
+            "ALIPAY_PUBLIC_KEY": "dummy-public-key",
+            "ALIPAY_SANDBOX": "1",
+        })
+        self.fx = _fixtures.Fixture().setup(with_package=True, expired=True, fee="1.00")
+
+    def tearDown(self):
+        self.fx.teardown()
+        alipay_client._KEY_BACKEND = self._saved_backend
+        for k, v in self._saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _create(self):
+        row = db.query_one(
+            "SELECT package_id, user_id FROM t_package WHERE package_id=%s",
+            (self.fx.package_ids[0],))
+        headers = {"Authorization": "Bearer " + auth.issue_kiosk_token(
+            "USER", row["user_id"])}
+        return self.client.post(
+            "/api/pay/create",
+            json={"biz_type": "OVERTIME", "biz_id": row["package_id"],
+                  "provider": "alipay_sandbox"},
+            headers=headers)
+
+    def test_create_returns_qr_code_url_in_alipay_mode(self):
+        """真实模式：qr_code_url = precreate 返回的二维码链接（前端据此渲染二维码）。"""
+        payload = {"alipay_trade_precreate_response":
+                   {"code": "10000", "qr_code": "https://qr.alipay.com/test-qr-token"}}
+        with mock.patch.object(alipay_client, "_post_form", return_value=payload):
+            resp = self._create()
+        self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+        body = resp.get_json()
+        self.assertEqual(body["provider"], "alipay_sandbox")
+        self.assertFalse(body["mock"])
+        self.assertFalse(body["degraded"])
+        self.assertEqual(body["qr_code_url"], "https://qr.alipay.com/test-qr-token")
+        self.assertTrue(body["redirect_url"], "真实模式仍应给出可跳转地址")
+
+    def test_create_falls_back_to_redirect_when_precreate_fails(self):
+        """预下单不可用时不能把建单搞失败：qr_code_url 退回跳转地址（仍非空）。"""
+        with mock.patch.object(alipay_client, "_post_form",
+                               side_effect=ConnectionError("network down")), \
+                mock.patch("time.sleep", return_value=None):
+            resp = self._create()
+        self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+        body = resp.get_json()
+        self.assertFalse(body["mock"])
+        self.assertTrue(body["qr_code_url"], "预下单失败也要给出可编码的二维码内容")
+        self.assertEqual(body["qr_code_url"], body["redirect_url"])
+
+
+# ===========================================================================
+# 一·七、BUG：复用 PENDING 单导致扫码"已过期" —— 每次 create 必须换新二维码
+# ===========================================================================
+@unittest.skipUnless(_db_ready(), "需要 MySQL 数据库")
+class AlipayQrRefreshTest(unittest.TestCase):
+    """修复前：复用 PENDING 单时 pay_no 不变，支付宝对同一 out_trade_no 只返回
+    **同一张旧码**（码串自生成起 2 小时有效；被扫过/交易超时后再扫提示"已失效"），
+    于是用户扫到的可能是几小时前的码。修复后：复用前先关旧交易，关得掉就换
+    pay_no（新 out_trade_no）→ precreate 拿全新码；关不掉先查单，已支付则入账并 409。
+    """
+
+    KEYS = ("PAYMENT_PROVIDER", "ALIPAY_APP_ID", "ALIPAY_PRIVATE_KEY",
+            "ALIPAY_PUBLIC_KEY", "ALIPAY_SANDBOX")
+
+    @classmethod
+    def setUpClass(cls):
+        app_module.app.config.update(TESTING=True)
+
+    def setUp(self):
+        self.client = app_module.app.test_client()
+        self._saved_env = {k: os.environ.get(k) for k in self.KEYS}
+        self._saved_backend = alipay_client._KEY_BACKEND
+        alipay_client._KEY_BACKEND = lambda op, *args: "FAKE_SIGN"
+        os.environ.update({
+            "PAYMENT_PROVIDER": "alipay",
+            "ALIPAY_APP_ID": "2021000000000000",
+            "ALIPAY_PRIVATE_KEY": "dummy-private-key",
+            "ALIPAY_PUBLIC_KEY": "dummy-public-key",
+            "ALIPAY_SANDBOX": "1",
+        })
+        self.fx = _fixtures.Fixture().setup(with_package=True, expired=True, fee="1.00")
+        self.pid = self.fx.package_ids[0]
+        row = db.query_one(
+            "SELECT user_id, pickup_code FROM t_package WHERE package_id=%s", (self.pid,))
+        self.code = row["pickup_code"]
+        self.headers = {"Authorization": "Bearer " + auth.issue_kiosk_token(
+            "USER", row["user_id"])}
+        payment._QUERY_THROTTLE.clear()      # 对账节流是进程内状态，逐用例重置
+
+    def tearDown(self):
+        self.fx.teardown()
+        alipay_client._KEY_BACKEND = self._saved_backend
+        for k, v in self._saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _create(self):
+        return self.client.post(
+            "/api/pay/create",
+            json={"biz_type": "OVERTIME", "biz_id": self.pid},
+            headers=self.headers)
+
+    def test_reuse_returns_cached_qr_without_precreate(self):
+        """普通复用：必须返回**缓存里的同一张码**，且不能再调 precreate（否则旧码被顶掉）。"""
+        with mock.patch.object(alipay_client, "precreate",
+                               return_value="https://qr.alipay.com/cached-one") as mocked, \
+                mock.patch.object(alipay_client, "query_trade",
+                                  return_value={"code": "40004",
+                                                "sub_code": "ACQ.TRADE_NOT_EXIST"}):
+            first = self._create()
+            second = self._create()
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        b1, b2 = first.get_json(), second.get_json()
+        self.assertEqual(b1["pay_id"], b2["pay_id"])
+        self.assertEqual(b1["pay_no"], b2["pay_no"], "未换交易时 pay_no 不变")
+        self.assertEqual(b2["qr_code_url"], "https://qr.alipay.com/cached-one")
+        self.assertEqual(b1["qr_code_url"], b2["qr_code_url"], "复用必须是同一张有效码")
+        self.assertEqual(mocked.call_count, 1, "复用不得重复预下单（会顶掉旧码）")
+        self.assertTrue(b2["reused"])
+
+    def test_reuse_after_scanned_rotates_to_new_qr(self):
+        """码已被扫过（交易 WAIT_BUYER_PAY）：关闭旧交易并换号出新码，旧码作废。"""
+        fresh = ["https://qr.alipay.com/first", "https://qr.alipay.com/second"]
+        with mock.patch.object(alipay_client, "precreate", side_effect=fresh), \
+                mock.patch.object(alipay_client, "query_trade",
+                                  return_value={"code": "10000",
+                                                "trade_status": "WAIT_BUYER_PAY"}), \
+                mock.patch.object(alipay_client, "close_trade",
+                                  return_value={"code": "10000"}) as closed:
+            first = self._create()
+            second = self._create()
+        b1, b2 = first.get_json(), second.get_json()
+        self.assertNotEqual(b1["pay_no"], b2["pay_no"], "被扫过必须换 out_trade_no")
+        self.assertEqual(b2["qr_code_url"], fresh[1], "必须给一张刚生成的新码")
+        self.assertGreaterEqual(closed.call_count, 1, "换号前要关闭旧交易")
+        self.assertTrue(b2["reused"])
+
+    def test_refresh_true_forces_new_qr(self):
+        """前端「刷新二维码」：refresh=true 时即使码没被扫过也换新交易出新码。"""
+        fresh = ["https://qr.alipay.com/r1", "https://qr.alipay.com/r2"]
+        with mock.patch.object(alipay_client, "precreate", side_effect=fresh), \
+                mock.patch.object(alipay_client, "query_trade",
+                                  return_value={"code": "40004",
+                                                "sub_code": "ACQ.TRADE_NOT_EXIST"}):
+            first = self._create()
+            second = self.client.post(
+                "/api/pay/create",
+                json={"biz_type": "OVERTIME", "biz_id": self.pid, "refresh": True},
+                headers=self.headers)
+        b1, b2 = first.get_json(), second.get_json()
+        self.assertNotEqual(b1["pay_no"], b2["pay_no"])
+        self.assertEqual(b1["qr_code_url"], fresh[0])
+        self.assertEqual(b2["qr_code_url"], fresh[1])
+
+    def test_reuse_when_old_trade_already_paid_books_it_and_returns_409(self):
+        """旧交易关不掉且查单为已支付：直接入账并 409，绝不换号（否则会丢单）。"""
+        with mock.patch.object(alipay_client, "precreate",
+                               return_value="https://qr.alipay.com/new"), \
+                mock.patch.object(alipay_client, "close_trade",
+                                  return_value={"code": "40004",
+                                                "sub_code": "ACQ.TRADE_HAS_SUCCESS"}), \
+                mock.patch.object(alipay_client, "query_trade",
+                                  return_value={"code": "10000",
+                                                "trade_status": "TRADE_SUCCESS",
+                                                "trade_no": "T-PAID-1"}):
+            self.assertEqual(self._create().status_code, 200)
+            second = self._create()
+        self.assertEqual(second.status_code, 409, second.get_data(as_text=True))
+        self.assertEqual(second.get_json()["code"], "CONFLICT")
+        order = db.query_one(
+            "SELECT pay_id, status FROM t_pay_order WHERE idempotency_key=%s",
+            (f"OVERTIME:{self.pid}",))
+        self.assertEqual(order["status"], "SUCCESS", "已支付的旧交易必须入账，不能丢")
+        pkg = db.query_one(
+            "SELECT overtime_fee_paid FROM t_package WHERE package_id=%s", (self.pid,))
+        self.assertEqual(int(pkg["overtime_fee_paid"]), 1)
+
+    def test_get_order_exposes_expired_flag(self):
+        """系统订单过期要可被前端感知：get/poll 返回 expired=true。"""
+        os.environ["PAYMENT_PROVIDER"] = "mock"      # 本用例不需要真实二维码
+        created = self._create().get_json()
+        db.execute("UPDATE t_pay_order SET expire_at=DATE_SUB(NOW(), INTERVAL 1 MINUTE) "
+                   "WHERE pay_id=%s", (created["pay_id"],))
+        body = self.client.get(f"/api/pay/{created['pay_id']}",
+                               headers=self.headers).get_json()
+        self.assertTrue(body["expired"], "过期 PENDING 单必须标记 expired=true")
+        self.assertEqual(body["status"], "PENDING")
+
+    def test_poll_reconciles_paid_trade_without_notify(self):
+        """没有异步通知（ALIPAY_NOTIFY_URL 为空）时，轮询必须能查单入账。"""
+        with mock.patch.object(alipay_client, "precreate",
+                               return_value="https://qr.alipay.com/x"):
+            created = self._create().get_json()
+        self.assertEqual(created["status"], "PENDING")
+        with mock.patch.object(alipay_client, "query_trade",
+                               return_value={"code": "10000",
+                                             "trade_status": "TRADE_SUCCESS",
+                                             "trade_no": "T-POLL-1",
+                                             "total_amount": "1.00"}):
+            resp = self.client.post(f"/api/pay/{created['pay_id']}/poll",
+                                    json={"pickup_code": self.code})
+        self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+        body = resp.get_json()
+        self.assertEqual(body["status"], "SUCCESS", "查单为已支付必须自动入账")
+        pkg = db.query_one("SELECT overtime_fee_paid FROM t_package WHERE package_id=%s",
+                           (self.pid,))
+        self.assertEqual(int(pkg["overtime_fee_paid"]), 1)
+
+    def test_reconcile_query_is_throttled(self):
+        """轮询 2s 一次，主动查单最多 3s 一次（避免把网关打爆）。"""
+        with mock.patch.object(alipay_client, "precreate",
+                               return_value="https://qr.alipay.com/y"):
+            created = self._create().get_json()
+        with mock.patch.object(alipay_client, "query_trade",
+                               return_value={"code": "10000",
+                                             "trade_status": "WAIT_BUYER_PAY"}) as queried:
+            for _ in range(2):
+                self.client.post(f"/api/pay/{created['pay_id']}/poll",
+                                 json={"pickup_code": self.code})
+        self.assertEqual(queried.call_count, 1, "3 秒内重复轮询不应重复查单")
 
 
 # ===========================================================================

@@ -196,9 +196,20 @@ const API = {
 
   // ---- 支付 ----
   // 创建支付单：body 只传 biz_type / biz_id / provider，金额与状态一律以查询为准
-  payCreate(payload) { return this.post("/pay/create", payload, { timeout: 15000 }); },
-  // 查询支付单：前端轮询此接口拿最终状态，不本地判定成功
+  payCreate(payload) { return this.post("/pay/create", payload, { timeout: 20000 }); },
+  // 查询支付单：前端轮询此接口拿最终状态，不本地判定成功。
+  // 需要登录态（USER 本人 / COURIER / admin）；匿名请用 payPollAnonymous。
   payStatus(payId) { return this.get(`/pay/${payId}`, { timeout: 10000 }); },
+  /**
+   * 匿名状态轮询（无 token 时使用，例如触屏端直接输取件码缴费）。
+   * 契约：POST /api/pay/{pay_id}/poll  body={"pickup_code":"641497"}
+   * 返回字段与 GET /api/pay/{id} 相同（不含 qr_code_url —— 二维码只在 create 返回）。
+   * auth:false 是刻意的：匿名通道靠 pickup_code 交叉校验，不依赖 Bearer token。
+   */
+  payPollAnonymous(payId, pickupCode) {
+    return this.post(`/pay/${payId}/poll`, { pickup_code: pickupCode },
+      { timeout: 10000, auth: false });
+  },
   // 仅 mock 模式可用：把支付单直接置为成功（演示用）
   payMockSucceed(payId) { return this.post(`/pay/${payId}/mock-succeed`, {}, { timeout: 10000 }); },
   // 管理端支付流水

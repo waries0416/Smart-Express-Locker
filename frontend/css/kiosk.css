@@ -369,6 +369,22 @@
   font-size: 70px; width: 120px; height: 120px; margin: 0 auto 8px; border-radius: 18px;
   display: flex; align-items: center; justify-content: center; background: #0f172a; color: #fff;
 }
+/* 有二维码时：由 JS 给外层加 .has-qr，取消固定 120x120，避免压住下方标题 */
+.pay-card .pay-qr.has-qr {
+  width: auto; height: auto; background: transparent; border-radius: 0;
+  font-size: 0; display: block;
+}
+/* 真实二维码：白底 + 固定尺寸，保证扫码识别率 */
+.pay-qr-canvas {
+  display: block; margin: 0 auto; padding: 8px; background: #fff;
+  border-radius: 14px; box-shadow: 0 4px 18px rgba(15, 23, 42, .12);
+  image-rendering: pixelated;
+}
+/* 扫码不便时的跳转收银台按钮 */
+.pay-jump {
+  display: block; margin: 4px auto 10px; padding: 10px 18px; font-size: 14px;
+  text-decoration: none; text-align: center; border-radius: 12px; max-width: 320px;
+}
 .pay-amount { font-size: 44px; font-weight: 900; color: #dc2626; margin: 6px 0; }
 .pay-progress { font-size: 14px; color: #64748b; margin: 6px 0 14px; }
 .pay-progress.ok { color: #16a34a; font-weight: 700; }

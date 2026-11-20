@@ -26,8 +26,15 @@ log = logging.getLogger("integrations.alipay")
 SANDBOX_GATEWAY = "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
 PROD_GATEWAY = "https://openapi.alipay.com/gateway.do"
 
-# 参与验签时**必须排除**的字段（支付宝文档：sign 与 sign_type 不参与签名）
-SIGN_EXCLUDE = ("sign", "sign_type")
+# 参与签名时**必须排除**的字段：
+#   · 请求签名（gateway.do 同步接口）：只排除 sign；**sign_type 要参与签名**。
+#     2026-11-20 BUG1 实测证据：沙箱网关在 isv.invalid-signature 的 sub_msg 里
+#     回显了它自己拼的待签串，其中明确包含 `sign_type=RSA2`；旧实现把 sign_type
+#     也排除了，导致所有真实请求（page.pay / precreate）都被判「验签出错」——
+#     页面支付跳过去只会看到支付宝的验签错误页，自然也就永远没有可扫的二维码。
+#   · 异步通知验签：按支付宝文档要排除 sign 与 sign_type 两个字段（见 NOTIFY_SIGN_EXCLUDE）。
+SIGN_EXCLUDE = ("sign",)
+NOTIFY_SIGN_EXCLUDE = ("sign", "sign_type")
 
 # 供单测替换：真实环境下由 _load_private_key/_load_public_key 提供
 _KEY_BACKEND = None
@@ -94,11 +101,16 @@ def unavailable_reason():
 # ---------------------------------------------------------------------------
 # 待签名串拼装（纯函数，离线可测）
 # ---------------------------------------------------------------------------
-def sign_content(params):
-    """按支付宝规则拼待签名串：剔除 sign/sign_type 与空值，键名 ASCII 升序，k=v 用 & 连接。"""
+def sign_content(params, exclude=SIGN_EXCLUDE):
+    """按支付宝规则拼待签名串：剔除 exclude 中的字段与空值，键名 ASCII 升序，k=v 用 & 连接。
+
+    注意 exclude 的差异（BUG1 修复点）：
+      · 请求签名用默认值 SIGN_EXCLUDE = ("sign",)：sign_type 参与签名；
+      · 异步通知验签用 NOTIFY_SIGN_EXCLUDE = ("sign", "sign_type")。
+    """
     items = []
     for k in sorted((params or {}).keys()):
-        if k in SIGN_EXCLUDE:
+        if k in exclude:
             continue
         v = params.get(k)
         if v is None or v == "":
@@ -177,11 +189,14 @@ def verify(data, signature, public_key_pem=None):
 
 
 def verify_callback(params):
-    """校验异步通知：拼待验签串 → 用支付宝公钥验签。返回 bool。"""
+    """校验异步通知：拼待验签串 → 用支付宝公钥验签。返回 bool。
+
+    异步通知的待验签串要排除 sign 与 sign_type（与同步请求签名规则不同）。
+    """
     sig = (params or {}).get("sign") or ""
     if not sig:
         return False
-    return verify(sign_content(params), sig)
+    return verify(sign_content(params, NOTIFY_SIGN_EXCLUDE), sig)
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +240,111 @@ def gateway_with_params(params):
     import urllib.parse
     qs = urllib.parse.urlencode(params)
     return f"{load_config()['gateway']}?{qs}"
+
+
+def _post_form(url, params, timeout):
+    """POST application/x-www-form-urlencoded 并解析 JSON 响应（只用标准库）。
+
+    为什么不用 requests：requirements.txt 里没有 requests，项目约定
+    「外部调用优先 urllib，减少依赖面」（见 requirements.txt 注释与 deepseek_client）。
+    """
+    import json as _json
+    import urllib.parse
+    import urllib.request
+    body = urllib.parse.urlencode(params).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded;charset=utf-8"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+    return _json.loads(raw.decode("utf-8", "replace"))
+
+
+def _call_api(method, biz, *, notify_url=None, timeout=8.0):
+    """通用 OpenAPI 调用：拼公共参数 → 签名 → POST → 返回该 method 的 response 节点。
+
+    两个与网关打交道的硬性细节（BUG1 实测）：
+      · `sign_type` **参与签名**（请求签名只排除 sign，见 SIGN_EXCLUDE）；
+      · `charset` 必须放在 **URL 查询串**里：body 里的非 ASCII 值（如中文 subject）
+        会被网关按默认字符集解码，导致待签串与签名不一致（isv.invalid-signature）。
+    沙箱网关偶发 ConnectionError（实测 5 次里 2 次），故对同一请求重试 3 次；
+    precreate/query/close 都是幂等的，重试安全。
+    """
+    if not available():
+        raise IntegrationError(unavailable_reason() or "支付宝沙箱未就绪")
+    cfg = load_config()
+    import json as _json
+    params = {
+        "app_id": cfg["app_id"],
+        "method": method,
+        "format": "JSON",
+        "charset": "utf-8",
+        "sign_type": "RSA2",
+        "timestamp": _now_str(),
+        "version": "1.0",
+        "notify_url": notify_url or cfg["notify_url"] or "",
+        "biz_content": _json.dumps(biz, ensure_ascii=False, separators=(",", ":")),
+    }
+    params = {k: v for k, v in params.items() if v != ""}
+    params["sign"] = sign(sign_content(params))
+    import time
+    last_exc = None
+    data = None
+    for attempt in range(3):
+        try:
+            data = _post_form(f"{cfg['gateway']}?charset=utf-8",
+                              {k: v for k, v in params.items() if k != "charset"},
+                              timeout)
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(0.4 * (attempt + 1))
+    if data is None:
+        raise IntegrationError(
+            f"支付宝请求失败：{type(last_exc).__name__}") from None
+    return (data or {}).get(method.replace(".", "_") + "_response") or {}
+
+
+def precreate(pay_no, amount, subject, *, notify_url=None, timeout_express="10m",
+              timeout=8.0):
+    """调 alipay.trade.precreate 换「扫码支付」二维码内容（qr_code）。
+
+    时效说明（重要，BUG 定位结论）：
+      · precreate 生成的 qr_code 自身有效期是 **2 小时**（支付宝固定规则）；
+      · 同一 out_trade_no **重复 precreate 只会返回同一张旧码**，不会刷新；
+      · 码被扫过/交易超时后再扫，支付宝会提示"二维码已失效"。
+    所以调用方（payment）在复用旧单时**必须换 out_trade_no** 才能拿到新码，
+    这也是本次"扫码提示已过期"的根因。
+    """
+    biz = {
+        "out_trade_no": pay_no,
+        "total_amount": f"{float(amount):.2f}",
+        "subject": subject,
+        "timeout_express": timeout_express,
+    }
+    node = _call_api("alipay.trade.precreate", biz, notify_url=notify_url,
+                     timeout=timeout)
+    qr = node.get("qr_code")
+    if not qr:
+        detail = " ".join(str(x) for x in (node.get("code"), node.get("sub_code"),
+                                           node.get("msg"), node.get("sub_msg")) if x)
+        raise IntegrationError(f"支付宝预下单失败：{detail[:200]}")
+    return qr
+
+
+def query_trade(pay_no, *, timeout=8.0):
+    """查询交易状态（复用旧单前确认是否已支付）。
+
+    返回 response 节点：trade_status=WAIT_BUYER_PAY/TRADE_SUCCESS/TRADE_FINISHED/
+    TRADE_CLOSED、trade_no、total_amount；交易不存在时 code=40004 + sub_code=ACQ.TRADE_NOT_EXIST。
+    """
+    return _call_api("alipay.trade.query", {"out_trade_no": pay_no}, timeout=timeout)
+
+
+def close_trade(pay_no, *, timeout=8.0):
+    """关闭未支付交易（best-effort）。返回 response 节点，code=10000 表示已关闭。"""
+    return _call_api("alipay.trade.close", {"out_trade_no": pay_no}, timeout=timeout)
 
 
 def _now_str():

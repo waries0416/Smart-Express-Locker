@@ -241,6 +241,53 @@
 - 寄件单（`t_package`）新增可空列 `pack_recommendation_id`，指向该推荐；快递员"备包装"任务据此生成材料清单快照（材料名/数量在任务行内快照，材料台账后续改名不影响历史任务）。
 - 前端如需在寄件流程中带上推荐：在现有寄件请求里加可选字段 `pack_recommendation_id`（integer）；该字段缺失时行为与改造前完全一致。
 
+### 2.4 寄件单新增寄件人 / 收件人地址（BUG2，可选字段）
+
+模块：`backend/business.py`（`send_order`、`_parse_address`、`_send_order_row`）
+
+**背景**：寄件表单原先只有寄件人 / 收件人的姓名与手机号，没有地址；但"快递员上门揽收"和"收件人收货"都必须知道地址。本次为 `POST /api/business/send-order` 增加两个**可选**字段。
+
+#### 请求新增字段（`POST /api/business/send-order`）
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `sender_address` | `string \| null` | 否 | 寄件人地址，≤120 字符。不传 / 空串 / 纯空白一律按 `null` 入库 |
+| `recipient_address` | `string \| null` | 否 | 收件人地址，同上规则 |
+
+- **归一化**：先 `strip()` 去首尾空白；去完为空则视为未填（`null`）。
+- **超长处理**：超过 120 字符返回 **400**，文案为
+  `寄件人地址过长（最多 120 个字符，当前 N 个）` / `收件人地址过长（最多 120 个字符，当前 N 个）`。
+  **明确不静默截断** —— 地址被截断会直接把件送错地方，宁可报错。
+- **向后兼容**：两个字段都不传时，请求/响应/数据库行为与改造前**完全一致**，老调用方零影响。
+
+请求示例：
+
+```json
+{ "user_phone": "13800000001", "user_name": "张三", "recipient_phone": "13900000002",
+  "recipient_name": "李四", "size_type": "SMALL", "weight": 1.2, "company_id": 3, "cabinet_id": 1,
+  "sender_address": "北京市海淀区中关村大街 1 号 3 单元 501",
+  "recipient_address": "上海市浦东新区世纪大道 100 号 A 座 12 层" }
+```
+
+#### 响应新增字段
+
+- `POST /api/business/send-order`（201）**响应顶层**新增 `sender_address` / `recipient_address`，**原样回显本次实际入库的值**（未填写为 `null`）。
+  - ⚠️ 注意层级：这两个字段在**响应顶层**，不在 `package` 对象里 —— `package` 由 `_detail()` 从视图 `v_package_detail` 读出，而该视图**不含**这两列。前端取值请用 `resp.sender_address`，不是 `resp.package.sender_address`。
+- `GET /api/business/send-lookup`（按揽收码/运单号/收件人手机号匹配）与 `GET /api/business/my-packages` 的寄件行，均通过同一构造函数 `_send_order_row()` 输出，因此**这些行里带**这两个字段；**历史寄件单为 `null`**。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `sender_address` | `string \| null` | 寄件人地址；未填写或历史数据为 `null` |
+| `recipient_address` | `string \| null` | 收件人地址；未填写或历史数据为 `null` |
+
+#### 数据库变更
+
+- `t_package` 新增两列：`sender_address VARCHAR(120) NULL`、`recipient_address VARCHAR(120) NULL`
+- 迁移脚本：`db/migrations/004_sender_address.sql`（幂等：用 `information_schema` 判断后 `PREPARE`/`EXECUTE`，可重复执行；只加可空列，不 DROP、不改动既有数据）
+- 重放：`python scripts/init_db.py --migrate` 或 `mysql -u root -p < db/migrations/004_sender_address.sql`
+
+> 前端只需在寄件表单加两个输入框并在请求里带上字段；不填就不传，行为与旧版一致。
+
 ---
 
 ## 3. 创新点 3：高德地图找柜与智能选柜
@@ -348,13 +395,18 @@
 
 ### 4.1 创建支付单 `POST /api/pay/create`
 
-- 权限：**USER 或 admin**
+- 权限：**USER / admin，或匿名凭取件码（仅超时费）**
   - USER：只能为**本人**名下包裹创建 → `biz_id` 必须是本人 `t_package.package_id`，否则 403 `FORBIDDEN`
   - admin：可为任意
+  - **匿名（无任何登录 token）**：凭 `pickup_code` 建单，仅 `biz_type=OVERTIME` 且包裹为 `EXPIRED` 未缴费时可用（触屏端「凭码取件 → 超时缴费」场景，见下方 4.1a）
 - 请求体：
 
 ```json
 { "biz_type": "OVERTIME", "biz_id": 319, "provider": "mock" }
+```
+
+```json
+{ "biz_type": "OVERTIME", "biz_id": 319, "pickup_code": "274653" }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -362,16 +414,18 @@
 | `biz_type` | `"OVERTIME" \| "SEND"` | 是 | `OVERTIME`=超时保管费；`SEND`=寄件费 |
 | `biz_id` | integer | 是 | `OVERTIME` 时为 `package_id`；`SEND` 时为寄件单 id |
 | `provider` | `"mock" \| "alipay_sandbox"` | 否 | 缺省取服务端 `PAYMENT_PROVIDER`；**请求里给的 provider 不能越过服务端配置**（服务端没配 alipay 时降级 mock） |
+| `pickup_code` | string | 否 | **匿名建单必填**，6 位取件码；仅 `biz_type=OVERTIME` 生效。**有登录态时该字段被忽略、不参与授权** |
 
 - **服务端金额快照**：金额由后端依据 `biz_type`+`biz_id` 重新计算，写入 `t_pay_order.amount`；**请求里带 `amount` 字段一律忽略**。
-- 响应 200（幂等：同 `biz_type`+`biz_id` 已有 `PENDING` 未过期单则**复用原单**返回，不新建）：
+- **鉴权优先级**：先尝试登录态（`Authorization: Bearer`）；**只有在登录态缺失时**才看 `pickup_code`。有 token 时即使带了码，仍按 token 的归属校验走，码被忽略 —— 这样持码者无法绕过归属校验去操作他人的支付单。
+- 响应 200（幂等：同 `biz_type`+`biz_id` 已有 `PENDING` 未过期单则**复用原单**返回，不新建）：**匿名与登录态返回结构完全一致**（都含 `qr_code_url` / `redirect_url`）。
 
 ```json
 { "pay_id": 9, "pay_no": "P20261118001", "amount": 1.00,
   "provider": "mock", "provider_label": "模拟支付", "mock": true,
   "status": "PENDING", "expire_at": "2026-11-18T15:10:00+08:00",
   "degraded": false, "degraded_reason": null,
-  "qr_code_url": null, "redirect_url": null }
+  "qr_code_url": null, "redirect_url": null, "reused": false }
 ```
 
 | 字段 | 类型 | 说明 |
@@ -384,10 +438,54 @@
 | `mock` | boolean | 是否模拟渠道 |
 | `status` | `"PENDING" \| "SUCCESS" \| "FAILED" \| "CLOSED"` | 新建时为 `PENDING` |
 | `expire_at` | string | ISO8601 带时区，默认 10 分钟后 |
-| `qr_code_url` | string \| null | 真实模式为支付宝二维码链接；mock 为 `null` |
-| `redirect_url` | string \| null | 真实模式为跳转地址；mock 为 `null` |
+| `qr_code_url` | string \| null | **支付宝预下单二维码内容**（如 `https://qr.alipay.com/bax...`）；mock 为 `null` |
+| `redirect_url` | string \| null | **支付宝网页收银台跳转地址**；mock 为 `null` |
+| `reused` | boolean | `true` 表示复用了已有未过期 `PENDING` 单，未新建 |
 
-- 错误：400 `BAD_REQUEST`（缺字段/枚举非法）、401、403 `FORBIDDEN`（越权包裹）、404 `NOT_FOUND`（biz 不存在）、409 `CONFLICT`（该单已支付成功）
+**关于 `qr_code_url` / `redirect_url`（BUG1 修复点，行为约定）**
+
+| 场景 | `qr_code_url` | `redirect_url` | 其他字段 |
+|---|---|---|---|
+| `mock` 模式（默认） | `null` | `null` | `mock: true`、`provider: "mock"`、`provider_label: "模拟支付"` |
+| `alipay` 沙箱，预下单成功 | 非空（`alipay.trade.precreate` 返回的二维码内容） | 非空（带签名的 `page.pay` 跳转地址） | `provider: "alipay_sandbox"`、`mock: false`、`degraded: false` |
+| `alipay` 沙箱，预下单失败 | **回退为 `redirect_url` 的值**（用跳转地址当二维码内容，扫码即打开 H5 收银台） | 非空 | **建单仍成功（200）**，不影响下单 |
+
+- 旧实现里 `qr_code_url` **恒为 `null`**（只有 `redirect_url`），前端拿不到任何可编码成二维码的内容，于是页面"没有二维码"——这就是 BUG1。现在真实模式保证两个字段都有可渲染的值。
+- 优先级：真二维码 → （失败时）跳转地址；**两种情况下前端都能直接渲染**，不需要自己判空分支。
+- 非 `PENDING` 状态（已 `SUCCESS`/`CLOSED`/`FAILED`）下，两个字段均为 `null`（不再需要展示收款码）。
+
+- 错误：400 `BAD_REQUEST`（缺字段/枚举非法）、401（**无任何凭证**）、403 `FORBIDDEN`（越权包裹）、404 `NOT_FOUND`（biz 不存在）、409 `CONFLICT`（该单已支付成功）
+
+### 4.1a 匿名持取件码缴费（方案 A）
+
+模块：`backend/payment_api.py`（`create_pay`）、`backend/payment.py`（`verify_overtime_pickup_code`）
+
+**为什么需要**：触屏端「凭取件码取件 → 发现超时 → 缴费」是**匿名流程** —— 用户在柜机前输 6 位取件码，不可能先登录拿 token。若不放行，该场景完全无法缴费。
+
+**信任模型**：与 `POST /api/business/pickup` **完全一致** —— 取件码本身就是该场景的凭证，持有 6 位码即视为有权处置这一件包裹的超时费。不引入新的信任假设。
+
+**约束（缺一不可）**：
+1. 仅当**完全没有登录态**时才启用该通道；有 token 时码被忽略（见 §4.1 鉴权优先级）。
+2. 仅 `biz_type=OVERTIME`；`SEND` 会返回 403 `该支付需登录后发起`。
+3. 包裹必须是 `EXPIRED` 且**未缴费**（没超时不出现付费入口；已付再建单会重复扣钱）。
+4. 码必须与 `biz_id` 指向**同一件** `RECEIVE` 包裹。
+
+**错误码（实测核对）**：
+
+| 场景 | 状态码 | `code` / `error` |
+|---|---|---|
+| 无 token 且无 `pickup_code` | **401** | `UNAUTHORIZED` `请先登录（管理端或触屏端）` |
+| 码错 / 与 `biz_id` 不匹配 / 包裹不存在 | **403** | `FORBIDDEN` `取件码与包裹不匹配` |
+| `biz_type=SEND` + 码 | **403** | `FORBIDDEN` `该支付需登录后发起` |
+| 包裹非 `EXPIRED`（如 `STORED`） | **409** | `CONFLICT` `该包裹当前无需支付超时费` |
+| 已缴费 | **409** | `CONFLICT` `该包裹超时费已支付，无需重复支付` |
+| 同 IP 超过 **10 次/分钟** | **429** | 带 `Retry-After` |
+
+> 注：错码、包裹不存在、码与 id 不匹配**统一返回同一句 403 文案** —— 不区分"包裹不存在"和"码不对"，避免用错误码差异探测包裹存在性。
+
+**频控**：`create` 与 `poll` 使用**两个独立**的 IP 滑动窗口桶（10/min 与 120/min），正常轮询不会吃掉建单额度。6 位码空间 10⁶，10 次/分钟下爆破不现实。
+
+**成功响应**：与登录态建单**结构完全一致**（含 `qr_code_url` / `redirect_url`）。
 
 ### 4.2 查询支付单 `GET /api/pay/{pay_id}`
 
@@ -404,7 +502,47 @@
 
 - `paid_at`：`SUCCESS` 时为支付完成时间字符串，否则 `null`
 - `fail_reason`：`FAILED`/`CLOSED` 时为中文原因，否则 `null`
+- **本接口不返回 `qr_code_url` / `redirect_url`**：这两个字段只出现在 `POST /api/pay/create` 的建单响应里（用于首次展示收款码）。查询接口用于轮询支付状态，不含收款码。前端如需重新展示二维码，请调用 `create`（同 `biz_type`+`biz_id` 的未过期 `PENDING` 单会被复用，`reused: true`，不会重复建单）。
 - 错误：401、403 `FORBIDDEN`、404 `NOT_FOUND`
+- **匿名场景请改用 §4.2a 的 `POST /api/pay/{pay_id}/poll`** —— 本接口要求登录态，匿名调用必然 401。
+
+### 4.2a 匿名轮询支付状态 `POST /api/pay/{pay_id}/poll`
+
+模块：`backend/payment_api.py`（`poll_pay_by_pickup_code`）
+
+- 权限：**无需鉴权**，凭 `pickup_code` 授权
+- 为什么不放宽 `GET /api/pay/{id}`：那个接口的语义是"本人 / 管理端查询"，放宽会破坏归属校验。触屏端匿名缴费只需要"这一笔单的状态"，用取件码做同源校验即可。
+- 请求体：
+
+```json
+{ "pickup_code": "274653" }
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `pickup_code` | string | 是 | 6 位取件码；必须与该支付单对应的包裹一致 |
+
+- 响应 200：**字段与 `GET /api/pay/{pay_id}` 完全一致**，**不含 `qr_code_url` / `redirect_url`**。
+
+```json
+{ "pay_id": 9, "pay_no": "P20261118001", "status": "PENDING", "amount": 1.00,
+  "provider": "mock", "provider_label": "模拟支付", "mock": true,
+  "paid_at": null, "created_at": "2026-11-18 15:00:00",
+  "fail_reason": null, "biz_type": "OVERTIME", "biz_id": 319,
+  "expire_at": "2026-11-18T15:10:00+08:00" }
+```
+
+- **只读**：不修改任何状态（不改支付单、不改包裹、不写流水），可安全轮询。
+- 错误（实测核对）：
+
+| 场景 | 状态码 | `code` / `error` |
+|---|---|---|
+| 缺 `pickup_code` | **400** | `BAD_REQUEST` `缺少 pickup_code` |
+| 支付单不存在 | **404** | `NOT_FOUND` `支付单不存在` |
+| 码不匹配 / 该单非 `OVERTIME` | **403** | `FORBIDDEN` `取件码与支付单不匹配` / `该支付单不支持取件码查询` |
+| 同 IP 超过 **120 次/分钟** | **429** | 带 `Retry-After` |
+
+> 频控 120/min 的依据：触屏端约 2 秒轮询一次 ≈ 30 次/分钟，留 4 倍余量；同时能挡住"顺序猜 `pay_id` + 猜码"的脚本。
 
 ### 4.3 模拟支付成功 `POST /api/pay/{pay_id}/mock-succeed`
 
@@ -468,8 +606,9 @@
 | `PUT /api/pack-materials/{id}` | COURIER 或 admin | 401 / 403 |
 | `GET /api/courier/packaging-tasks` | COURIER（本人）或 admin | 401 / 403 `ROLE_REQUIRED` |
 | `POST /api/courier/packaging-tasks/{id}/done` | COURIER（本人）或 admin | 401 / 403 |
-| `POST /api/pay/create` | USER（本人包裹）或 admin | 401 / 403 `FORBIDDEN` |
+| `POST /api/pay/create` | USER（本人包裹）或 admin；**或匿名凭 `pickup_code`（仅 OVERTIME）** | 401（无任何凭证）/ 403 `FORBIDDEN` / 409 `CONFLICT` / 429 |
 | `GET /api/pay/{pay_id}` | USER（本人）/ COURIER（相关）/ admin | 401 / 403 |
+| `POST /api/pay/{pay_id}/poll` | **公开（凭 `pickup_code`），只读** | 400 / 403 / 404 / 429 |
 | `POST /api/pay/{pay_id}/mock-succeed` | admin 且 mock 模式 | 401 / 403 `MOCK_NOT_ALLOWED` |
 | `POST /api/pay/notify/alipay` | 公开但需 RSA2 验签 | 返回 `fail` 文本 |
 | `GET /api/pay/records` | admin | 401 / 403 `ROLE_REQUIRED` |

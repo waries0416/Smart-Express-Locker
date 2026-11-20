@@ -365,18 +365,29 @@
   <!-- 超时扫码支付弹层 -->
   <div class="kiosk-modal" id="payModal">
     <div class="km-card pay-card">
-      <div class="pay-qr">📱</div>
-      <h3>超时保管费</h3>
-      <div class="pay-amount" id="payAmount">¥1.00</div>
-      <!-- 支付提供方与 mock 标识由 payStatusMeta / 后端 provider_label 驱动 -->
-      <div class="pay-provider-line">
-        <span class="pay-provider-tag" id="payProviderTag">模拟支付</span>
-        <span class="pay-provider-note" id="payProviderNote">演示环境，不会真实扣款</span>
+      <!-- 二维码区：真实沙箱模式画二维码；mock / 无二维码时显示占位图标 -->
+      <div class="pay-qr" id="payQrBox">
+        <canvas id="payQrCanvas" class="pay-qr-canvas" hidden></canvas>
+        <div class="pay-qr-icon" id="payQrIcon">📱</div>
       </div>
-      <p class="muted" id="payDesc">请使用微信 / 支付宝扫码支付</p>
+      <h3 id="payTitle">超时保管费</h3>
+      <div class="pay-amount" id="payAmount">¥1.00</div>
+      <!-- 支付提供方与 mock 标识由后端 provider_label 驱动，前端不硬编码 -->
+      <div class="pay-provider-line">
+        <!-- 支付提供方与 mock 标识由后端 provider_label 驱动；未拿到之前显示中性占位，
+             避免在真实沙箱模式下误导用户「这是模拟支付」 -->
+        <span class="pay-provider-tag" id="payProviderTag">--</span>
+        <span class="pay-provider-note" id="payProviderNote">正在获取支付渠道…</span>
+      </div>
+      <p class="muted" id="payDesc">请使用支付宝扫码支付</p>
+      <!-- 扫码不便时直接跳收银台（redirect_url） -->
+      <a class="btn ghost pay-jump" id="payJump" href="#" target="_blank" rel="noopener" hidden>
+        🔗 打不开扫码？点此跳转收银台
+      </a>
       <div class="pay-progress" id="payProgress">等待支付…</div>
       <div class="btn-row" style="justify-content:center;">
         <button class="btn green" id="payConfirm" onclick="confirmPay()">✅ 我已支付</button>
+        <button class="btn ghost" id="payRefresh" onclick="refreshPayQr()" hidden>🔄 刷新二维码</button>
         <button class="btn ghost" onclick="closePay()">取消</button>
       </div>
     </div>
@@ -398,6 +409,7 @@
 
   <script src="js/api-core.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/qrcode-mini.js"></script>
   <script src="js/kiosk.js"></script>
   <script src="js/kiosk-innovations.js"></script>
 </body>
